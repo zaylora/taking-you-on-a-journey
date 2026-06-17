@@ -19,8 +19,6 @@ def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:
     # 城市中心 = 质心
     cx = sum(p.get("lng", 0.0) for p in points) / len(points)
     cy = sum(p.get("lat", 0.0) for p in points) / len(points)
-    center = {"lng": cx, "lat": cy}
-
     # 按方位角排序，使同方向的点相邻，便于「顺路」分天
     ordered = sorted(points, key=lambda p: math.atan2(p.get("lat", 0.0) - cy,
                                                        p.get("lng", 0.0) - cx))
@@ -33,16 +31,16 @@ def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:
         size = base + (1 if d < extra else 0)
         seg = ordered[idx:idx + size]
         idx += size
-        buckets[d] = _nearest_neighbor_order(seg, center)
+        buckets[d] = _nearest_neighbor_order(seg)
     return buckets
 
 
-def _nearest_neighbor_order(seg: list[dict], center: dict) -> list[dict]:
+def _nearest_neighbor_order(seg: list[dict]) -> list[dict]:
     if not seg:
         return []
     remaining = list(seg)
-    # 起点：离中心最近的点
-    cur = min(remaining, key=lambda p: _dist(p, center))
+    # 起点：经纬度字典序最小的「端点」（确定性；共线时保证单调顺路，不从中间起步）
+    cur = min(remaining, key=lambda p: (p.get("lng", 0.0), p.get("lat", 0.0)))
     remaining.remove(cur)
     route = [cur]
     while remaining:
