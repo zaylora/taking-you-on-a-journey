@@ -5,6 +5,13 @@ from app.graph.state import TripState
 
 
 def test_event_constants_present():
+    # M1 constants
+    assert C.EVENT_NODE_START == "node_start"
+    assert C.EVENT_TOKEN == "token"
+    assert C.EVENT_NODE_END == "node_end"
+    assert C.EVENT_FINAL == "final"
+    assert C.EVENT_ERROR == "error"
+    # M2 constants
     assert C.EVENT_SESSION == "session"
     assert C.EVENT_CLARIFY == "clarify"
     assert C.MAX_CLARIFY_ROUNDS == 4
