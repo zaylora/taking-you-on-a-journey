@@ -20,6 +20,7 @@ def _fake_build_llm(*args, **kwargs):
 def client(monkeypatch):
     # 1) 绕过启动 fail-fast：假 Key + 清缓存（lifespan 会重新读取）
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake")
+    monkeypatch.setenv("AMAP_WEB_KEY", "amap-test-fake")
     from app.core.config import get_settings
     get_settings.cache_clear()
     # 2) 给 summarize 打桩（替换其模块内引用的 build_llm）

@@ -23,10 +23,12 @@ async def lifespan(app: FastAPI):
         raise RuntimeError(
             f"缺少 {settings.llm_provider} 的 API Key，请在 backend/.env 中配置后再启动。"
         )
+    if not settings.amap_web_key.get_secret_value():
+        raise RuntimeError("缺少 AMAP_WEB_KEY，请在 backend/.env 中配置后再启动。")
     yield
 
 
-app = FastAPI(title="Trip Planner Backend (M1)", lifespan=lifespan)
+app = FastAPI(title="Trip Planner Backend (M2)", lifespan=lifespan)
 
 _settings = get_settings()
 app.add_middleware(

@@ -27,6 +27,9 @@ class Settings(BaseSettings):
 
     temperature: float = 0.0
 
+    # 高德 Web 服务（后端代理，Key 不下发前端）
+    amap_web_key: SecretStr = SecretStr("")
+
     # 前端直连需放行的源（开发期 Vite 默认 5173）。
     # 如需用环境变量 CORS_ORIGINS 覆盖，须传 JSON 数组字符串，例如：
     #   CORS_ORIGINS=["http://localhost:5173","https://example.com"]
