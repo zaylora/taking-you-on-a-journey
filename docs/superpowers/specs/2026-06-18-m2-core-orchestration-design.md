@@ -20,6 +20,7 @@
 | `itinerary` 聚类分天 | **手写贪心 + 预留 `cluster_by_day` 接口** | 10-30 个点量级，手写零依赖且能直接表达「每天均衡+顺路」业务约束；接口固定，未来到 numpy 生态拐点可替换为 KMeans 而不动节点/图 |
 | 会话 `thread_id` 来源 | **后端生成**，`session` 事件首帧下发 | 前端无需预生成；后端用 uuid 作 checkpointer thread，interrupt 跨请求恢复 |
 | checkpointer | **MemorySaver** | MVP 内存级；产品化（M6）换持久化后端 |
+| 过程展示粒度 | **进度点亮 + 友好阶段文案** | `node_start` 携 `label` 中文文案（如「正在检索热门景点…」），前端进度条展示；**不暴露中间 LLM 原始 token**；partial 结果预览留 M5 |
 
 ---
 
@@ -104,7 +105,7 @@ weather  attractions restaurants transport
 | event | data（JSON 单行） | 含义 | 新增/沿用 |
 | ----- | ----------------- | ---- | --------- |
 | `session` | `{"thread_id":"<uuid>"}` | **首帧**下发会话 id（仅新会话发一次） | 🆕 |
-| `node_start` | `{"node":"attractions"}` | 进入节点（并行时会多个并发） | 沿用 |
+| `node_start` | `{"node":"attractions","label":"正在检索热门景点…"}` | 进入节点（`label`=友好阶段文案，前端进度条展示；并行时会多个并发） | 扩展 |
 | `token` | `{"text":"成"}` | LLM 逐字输出（**仅 summarize 节点**） | 沿用 |
 | `node_end` | `{"node":"attractions"}` | 节点结束 | 沿用 |
 | `clarify` | `{"field":"budget","question":"预算档位？","options":["经济","舒适","高端"]}` | 图在 interrupt 处暂停，抛澄清问题（**本轮结束信号之一**，options 空数组=自由文本） | 🆕 |
@@ -316,6 +317,14 @@ from app.core.constants import (EVENT_SESSION, EVENT_NODE_START, EVENT_TOKEN,
 GRAPH = build_graph()
 NODES = {"clarify","dispatch","weather","attractions","restaurants","transport","itinerary","summarize"}
 
+# 友好阶段文案：node_start 携带，前端进度条展示（不暴露中间 LLM token）。建议放 core/constants.py 共享。
+NODE_LABELS = {
+    "clarify": "正在理解你的需求…", "dispatch": "正在梳理需求要点…",
+    "weather": "正在查询目的地天气…", "attractions": "正在检索热门景点…",
+    "restaurants": "正在挑选餐厅…", "transport": "正在规划交通…",
+    "itinerary": "正在按顺路编排每日行程…", "summarize": "正在生成攻略…",
+}
+
 def _sse(event, payload): return {"event": event, "data": json.dumps(payload, ensure_ascii=False)}
 
 async def sse_events(message: str, thread_id: str | None, request):
@@ -337,7 +346,7 @@ async def sse_events(message: str, thread_id: str | None, request):
                 break
             kind, name = ev["event"], ev.get("name")
             if kind == "on_chain_start" and name in NODES:
-                yield _sse(EVENT_NODE_START, {"node": name})
+                yield _sse(EVENT_NODE_START, {"node": name, "label": NODE_LABELS.get(name, "")})
             elif kind == "on_chat_model_stream" and ev["metadata"].get("langgraph_node") == "summarize":
                 tok = ev["data"]["chunk"].content
                 if tok: yield _sse(EVENT_TOKEN, {"text": tok})
@@ -375,12 +384,12 @@ async def chat(req: ChatRequest, request: Request):
 
 | 文件 | 变更 |
 | ---- | ---- |
-| `types/index.ts` | `EventName` 加 `'session'\|'clarify'`；加 `SessionPayload{thread_id}`、`ClarifyPayload{field,question,options}`；`FinalPayload` 加 `day_plans` |
+| `types/index.ts` | `EventName` 加 `'session'\|'clarify'`；加 `SessionPayload{thread_id}`、`ClarifyPayload{field,question,options}`；`NodeStartPayload` 加可选 `label`；`FinalPayload` 加 `day_plans` |
 | `api/sse.ts` | 请求体加 `thread_id`；新增参数透传 |
 | `stores/trip.ts` | 加 `threadId`、`dayPlans`、`clarifyPending`（当前待答澄清问题）；`agentProgress` 改为 `Record<string,'running'\|'done'>` 真正点亮；加 `setThreadId/setClarify/clearClarify/setDayPlans` |
 | `composables/useSSE.ts` | `send(message)` 带 store 的 `threadId`；处理 `session`（存 threadId）、`clarify`（停 loading + 渲染问题气泡 + 选项）、`final`（停 loading + 存 day_plans）；`node_start/end` 更新 progress map |
 | `components/ClarifyOptions.vue`（新建） | 渲染 `el-radio-group`/`el-button` 选项；点选或自由输入 → 调 `send(answer)`（带同一 threadId）恢复 |
-| `components/AgentProgress.vue` | 8 节点进度点亮（并行节点可同时 running） |
+| `components/AgentProgress.vue` | 8 节点进度点亮（并行节点可同时 running）；展示 `node_start` 携带的 `label` 阶段文案（无 label 时回退本地节点名映射） |
 | `components/MessageList.vue` | 支持渲染 clarify 问题气泡（区别于普通 AI 文本） |
 
 **多轮澄清前端时序**：
