@@ -227,7 +227,8 @@ from langgraph.types import interrupt
 # 1) LLM structured output 评估当前 state 的需求完整度，找缺口 gaps:[{field,question,options?}]
 # 2) clarify_round 超上限（如 >=4）→ 取默认值兜底，return {"clarified": True}
 # 3) 无缺口 → return {"clarified": True}
-# 4) 有缺口 → answer = interrupt({"type":"clarify","field","question","options"})
+# 4) 有缺口 → answer = interrupt({"field":..., "question":..., "options":...})
+#    （interrupt 传入的 dict 即 §3.1 clarify 事件的 data，桥接层原样下发，字段须与契约一致）
 #    恢复后把 answer 解析进对应结构化字段 + 追加 clarify_history，return {"clarified": False, "clarify_round": +1, ...}
 #    条件边 route_after_clarify 再次进入 clarify 评估下一缺口
 ```
