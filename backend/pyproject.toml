@@ -1,0 +1,26 @@
+[project]
+name = "backend"
+version = "0.1.0"
+description = "Trip Planner backend (M1 skeleton): FastAPI + LangGraph + SSE"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "fastapi==0.137.1",
+    "httpx>=0.28.1",
+    "langchain>=1.3.9",
+    "langchain-anthropic==1.4.6",
+    "langchain-openai==1.3.2",
+    "langgraph==1.2.5",
+    "pydantic-settings==2.14.1",
+    "sse-starlette==3.4.4",
+    "uvicorn[standard]==0.49.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.0",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
