@@ -21,6 +21,10 @@ def test_health(client):
 
 
 def test_chat_stream_emits_token_and_final(client, monkeypatch):
+    from app.graph.nodes.dispatch import NormalizedReq
+    from tests.conftest import make_fake_build_llm
+    fake_req = NormalizedReq(city="东京", start_date="", days=3, num_people=1)
+    monkeypatch.setattr("app.graph.nodes.dispatch.build_llm", make_fake_build_llm(structured=fake_req))
     monkeypatch.setattr("app.graph.nodes.summarize.build_llm", _fake_build_llm)
     resp = client.post("/api/chat", json={"message": "帮我规划三天东京行程"})
     assert resp.status_code == 200
