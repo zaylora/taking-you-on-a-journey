@@ -37,6 +37,7 @@ def test_plan_item_and_hotel_carry_cost_and_hotel():
     assert dumped["items"][0]["cost"] == 60.0
     assert dumped["hotel"]["price"] == 400.0
     assert DayPlan(day=2, center=Location(), items=[]).hotel is None
+    assert Hotel().price == 0.0 and Hotel().model_dump()["name"] == ""
 
 
 def test_build_payload_injects_budget_advice():

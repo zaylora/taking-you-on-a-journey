@@ -138,10 +138,10 @@ def _nearest_neighbor_order(seg: list[dict]) -> list[dict]:
 # Async graph node (Task 8)
 # ---------------------------------------------------------------------------
 
-def _build_payload(state: dict, clusters: list) -> dict:
+def _build_payload(state: dict, clusters: list, days: int | None = None) -> dict:
     """构造传给 LLM 的输入 payload；回退时带上 budget_advice。纯函数，便于单测。"""
     payload = {
-        "days": state.get("days", 3) or 3,
+        "days": days if days is not None else (state.get("days", 3) or 3),
         "clusters": clusters,
         "restaurants": state.get("restaurants", []),
         "transport": state.get("transport", {}),
@@ -168,7 +168,7 @@ async def itinerary(state, config) -> dict:
         daily_centers.append({"lng": cx, "lat": cy})
 
     llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
-    payload = _build_payload(state, clusters)
+    payload = _build_payload(state, clusters, days)
     result = await llm.ainvoke([
         SystemMessage(content=_SYS),
         HumanMessage(content=str(payload)),
