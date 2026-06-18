@@ -43,6 +43,7 @@ export function useSSE() {
             break
           case 'final':
             tripStore.setDayPlans((data as FinalPayload).day_plans || [])
+            tripStore.setBudget((data as FinalPayload).budget ?? null)
             loading.value = false
             break
           case 'error':

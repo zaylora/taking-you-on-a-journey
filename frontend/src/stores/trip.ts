@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ClarifyPayload, DayPlan } from '../types'
+import type { ClarifyPayload, DayPlan, Budget } from '../types'
 
 export interface Message {
   role: 'user' | 'assistant'
@@ -17,6 +17,7 @@ export const useTripStore = defineStore('trip', () => {
   const activeDay = ref<number | null>(null)
   const activePoiId = ref<string | null>(null)
   const clarifyPending = ref<ClarifyPayload | null>(null)
+  const budget = ref<Budget | null>(null)
 
   const addMessage = (role: 'user' | 'assistant', content: string, kind: 'text' | 'clarify' | 'error' = 'text') => {
     messages.value.push({ role, content, kind })
@@ -54,11 +55,12 @@ export const useTripStore = defineStore('trip', () => {
   }
   const setActiveDay = (d: number | null) => { activeDay.value = d }
   const setActivePoi = (id: string | null) => { activePoiId.value = id }
+  const setBudget = (b: Budget | null) => { budget.value = b }
 
   return {
     messages, agentProgress, nodeLabels, threadId, dayPlans, clarifyPending,
-    activeDay, activePoiId,
+    activeDay, activePoiId, budget,
     addMessage, appendToLastMessage, startNode, endNode, clearProgress,
-    setThreadId, setClarify, clearClarify, setDayPlans, setActiveDay, setActivePoi,
+    setThreadId, setClarify, clearClarify, setDayPlans, setActiveDay, setActivePoi, setBudget,
   }
 })

@@ -22,7 +22,7 @@ import { useTripStore } from '../stores/trip'
 const LABELS: Record<string, string> = {
   clarify: '理解需求', dispatch: '梳理要点', weather: '查询天气',
   attractions: '检索景点', restaurants: '挑选餐厅', transport: '规划交通',
-  itinerary: '编排行程', summarize: '生成攻略',
+  itinerary: '编排行程', accommodation: '挑选住宿', budget: '核算预算', summarize: '生成攻略',
 }
 const tripStore = useTripStore()
 const entries = computed(() => Object.entries(tripStore.agentProgress))
