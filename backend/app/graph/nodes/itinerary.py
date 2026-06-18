@@ -140,7 +140,7 @@ async def itinerary(state, config) -> dict:
     result = await llm.ainvoke([
         {"role": "system", "content": _SYS},
         {"role": "user", "content": str(payload)},
-    ])
+    ], config=config)
     return {
         "daily_centers": daily_centers,
         "day_plans": [d.model_dump(by_alias=True) for d in result.days],

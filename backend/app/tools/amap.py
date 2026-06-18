@@ -2,6 +2,7 @@
 Key 取自 config.amap_web_key，绝不下发前端、绝不进日志/SSE。
 """
 import httpx
+from langsmith import traceable
 
 from app.core.config import get_settings
 
@@ -13,6 +14,7 @@ def _key() -> str:
     return get_settings().amap_web_key.get_secret_value()
 
 
+@traceable(run_type="tool", name="amap_geocode")
 async def geocode(city: str) -> dict:
     """城市 → 中心坐标 {lng,lat}。失败降级 {}。"""
     try:
@@ -29,6 +31,7 @@ async def geocode(city: str) -> dict:
         return {}
 
 
+@traceable(run_type="tool", name="amap_search_poi")
 async def search_poi(city: str, keywords: str, poi_type: str = "", page_size: int = 20) -> list[dict]:
     """景点/餐厅候选。每项 name/poi_id/lng/lat/address/type。失败/空 []。"""
     try:
@@ -54,6 +57,7 @@ async def search_poi(city: str, keywords: str, poi_type: str = "", page_size: in
         return []
 
 
+@traceable(run_type="tool", name="amap_get_weather")
 async def get_weather(city: str) -> dict:
     """实时+预报；失败/远期降级季节气候文案。{text,temp,is_rainy,source}。"""
     try:
@@ -78,6 +82,7 @@ async def get_weather(city: str) -> dict:
         return {"text": "以当季气候为准", "temp": "", "is_rainy": False, "source": "climate"}
 
 
+@traceable(run_type="tool", name="amap_plan_route")
 async def plan_route(origin: str, dest: str, mode: str = "transit") -> dict:
     """大交通/市内交通方案；失败降级 {}。"""
     try:

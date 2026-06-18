@@ -1,4 +1,5 @@
 """dispatch 节点（M2 升级）：把 query + clarify_history 标准化为结构化需求。"""
+from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
 from app.llm.factory import build_llm
@@ -18,14 +19,14 @@ class NormalizedReq(BaseModel):
     budget: float = 0.0
 
 
-async def dispatch(state) -> dict:
+async def dispatch(state, config: RunnableConfig) -> dict:
     llm = build_llm(temperature=0).with_structured_output(NormalizedReq, method="function_calling")
     history = state.get("clarify_history", [])
     answered = "；".join(f"{h['field']}={h.get('answer','')}" for h in history) or "（无）"
     req = await llm.ainvoke([
         {"role": "system", "content": _SYS},
         {"role": "user", "content": f"原始需求：{state.get('query','')}\n已澄清：{answered}"},
-    ])
+    ], config=config)
     data = req.model_dump()
     return {
         **data,

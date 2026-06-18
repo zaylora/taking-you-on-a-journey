@@ -4,6 +4,7 @@
 - 有缺口 → interrupt 抛出 {field,question,options}，resume 后写回 clarify_history。
 ⚠️ interrupt 前的评估在 resume 时会重跑，故 temperature=0 保持确定性。
 """
+from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
 
@@ -28,7 +29,7 @@ class ClarifyGaps(BaseModel):
     gaps: list[Gap] = Field(default_factory=list)
 
 
-async def _evaluate_gaps(state) -> list[Gap]:
+async def _evaluate_gaps(state, config: RunnableConfig) -> list[Gap]:
     llm = build_llm(temperature=0).with_structured_output(ClarifyGaps, method="function_calling")
     history = state.get("clarify_history", [])
     answered = "；".join(f"{h['field']}={h.get('answer','')}" for h in history) or "（无）"
@@ -36,15 +37,15 @@ async def _evaluate_gaps(state) -> list[Gap]:
         {"role": "system", "content": _SYS},
         {"role": "user", "content": f"原始需求：{state.get('query','')}\n已澄清：{answered}"},
     ]
-    result = await llm.ainvoke(prompt)
+    result = await llm.ainvoke(prompt, config=config)
     return result.gaps
 
 
-async def clarify(state) -> dict:
+async def clarify(state, config: RunnableConfig) -> dict:
     rnd = state.get("clarify_round", 0)
     if rnd >= MAX_CLARIFY_ROUNDS:
         return {"clarified": True}
-    gaps = await _evaluate_gaps(state)
+    gaps = await _evaluate_gaps(state, config)
     if not gaps:
         return {"clarified": True}
     g = gaps[0]
