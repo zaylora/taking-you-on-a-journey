@@ -11,6 +11,7 @@ from app.core.config import get_settings
 def build_llm(provider: str | None = None, **overrides) -> BaseChatModel:
     s = get_settings()
     provider = provider or s.llm_provider
+    disable_streaming = overrides.pop("disable_streaming", "tool_calling")
 
     if provider == "openai":
         return init_chat_model(
@@ -19,6 +20,7 @@ def build_llm(provider: str | None = None, **overrides) -> BaseChatModel:
             api_key=s.openai_api_key.get_secret_value() or None,
             base_url=s.openai_base_url,
             temperature=overrides.pop("temperature", s.temperature),
+            disable_streaming=disable_streaming,
             **overrides,
         )
 
@@ -29,6 +31,7 @@ def build_llm(provider: str | None = None, **overrides) -> BaseChatModel:
             api_key=s.anthropic_api_key.get_secret_value() or None,
             base_url=s.anthropic_base_url,
             temperature=overrides.pop("temperature", s.temperature),
+            disable_streaming=disable_streaming,
             **overrides,
         )
 
