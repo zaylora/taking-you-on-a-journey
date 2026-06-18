@@ -56,6 +56,7 @@ async def sse_events(message: str, thread_id: str | None, request):
         else:
             answer = (snap.values or {}).get("summary", "")
             day_plans = (snap.values or {}).get("day_plans", [])
-            yield _sse(EVENT_FINAL, {"answer": answer, "day_plans": day_plans})
+            budget = (snap.values or {}).get("budget_check", {})
+            yield _sse(EVENT_FINAL, {"answer": answer, "day_plans": day_plans, "budget": budget})
     except Exception:  # noqa: BLE001 —— 脱敏：不泄露 Key/堆栈
         yield _sse(EVENT_ERROR, {"message": "生成失败，请重试"})
