@@ -133,6 +133,50 @@ uv run pytest -q               # 对 LLM + 高德 tool 打桩，不依赖真实 
 - `test_itinerary.py`：行程编排产出 `day_plans` 符合结构。
 - `test_chat_stream_m2.py`：完整 SSE 流 session → clarify → 并行 → final。
 
+## M3 验收清单
+
+M3 为纯前端里程碑：消费 M2 产出的 `day_plans`，实现高德地图打点 + 行程卡片 + 卡片↔地图双向联动。后端无改动（`map_proxy.py` 仍为空壳，POI 代理延后至 M5）。
+
+- **数据契约**：前端 `day_plans` 强类型化（`DayPlan/TripItem/LngLat/DayWeather`），`poi_id` 为联动主键。
+- **地图 Key 隔离**：后端 `AMAP_WEB_KEY` 不下发前端；前端用独立 `VITE_AMAP_JS_KEY`（JS API Key，需配域名白名单）。
+- **加载守卫**：`VITE_AMAP_JS_KEY` 缺失时地图不加载、显示降级提示，应用其余功能不受影响。
+- **布局**：右侧地图铺满，行程为右侧竖向悬浮面板，可收起/展开。
+
+### 配置与启动（M3）
+
+```bash
+cd frontend
+cp .env.example .env                       # PowerShell: Copy-Item .env.example .env
+# 编辑 .env，填入：
+# VITE_AMAP_JS_KEY=<高德 JS API Key>       # 控制台「Web端(JS API)」类型，配 localhost 白名单
+bun install                                # 首次
+bun run dev
+# 浏览器访问 http://localhost:5173
+```
+
+**说明**：高德 JS API Key 与后端 `AMAP_WEB_KEY`（Web 服务）是两类不同 Key，不可混用。
+
+### 端到端验收（前端）
+
+在 backend 已启动、前端已填 `VITE_AMAP_JS_KEY` 的前提下，走完 M2 对话流生成行程后：
+
+1. **自动打点**：行程生成（`final`）后，地图按 `day_plans` 自动打点并 `setFitView` 自适应视野；同一天的点同色，按天循环配色。
+2. **卡片→地图**：点击右侧行程卡片，地图聚焦该 `poi_id`（居中 + 信息窗），卡片高亮。
+3. **地图→卡片**：点击地图标记，对应卡片高亮并自动滚动到可视区。
+4. **按天切换**：点击 Day Tab 切换当天打点与卡片列表。
+5. **收起/展开**：行程面板可收起为「行程」窄条、展开为完整时间线，地图区域不被遮挡。
+6. **Key 缺失降级**：清空 `VITE_AMAP_JS_KEY` 重启，地图区显示降级提示，对话/澄清/逐字攻略仍正常。
+7. **✅ 验收**：自动打点、双向联动、按天切换、收起展开、缺 Key 降级五点均通过。
+
+### 测试（M3）
+
+M3 无新增单测框架，验证手段为类型检查构建 + 上述手动验收：
+
+```bash
+cd frontend
+bun run build                  # = vue-tsc -b && vite build，类型契约即测试，须全绿
+```
+
 ## 测试（M1）
 
 ```bash
