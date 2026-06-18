@@ -47,40 +47,72 @@ watch(
   (id) => { if (amap.ready.value) amap.focusPoi(id) },
 )
 
+const getTransportLocations = (transportItem: any) => {
+  let startLoc = null
+  let endLoc = null
+  for (const dp of tripStore.dayPlans) {
+    const idx = dp.items.indexOf(transportItem)
+    if (idx !== -1) {
+      if (idx > 0) {
+        startLoc = dp.items[idx - 1].location
+      } else {
+        const prevDay = tripStore.dayPlans.find(d => d.day === dp.day - 1)
+        if (prevDay && prevDay.hotel) startLoc = prevDay.hotel.location
+      }
+      
+      if (idx < dp.items.length - 1) {
+        endLoc = dp.items[idx + 1].location
+      } else if (dp.hotel) {
+        endLoc = dp.hotel.location
+      }
+      break
+    }
+  }
+  return { startLoc, endLoc }
+}
+
+const prefetchRouteInfos = async () => {
+  for (const dp of tripStore.dayPlans) {
+    for (const item of dp.items) {
+      if (item.type === 'transport' && !item.routeInfo) {
+        const { startLoc, endLoc } = getTransportLocations(item)
+        if (startLoc && endLoc) {
+          const info = await amap.fetchRouteInfo(startLoc, endLoc, item.mode)
+          if (info) item.routeInfo = info
+          await new Promise(r => setTimeout(r, 200)) // 防高并发
+        }
+      }
+    }
+  }
+}
+
+watch(
+  () => [tripStore.dayPlans, amap.ready.value] as const,
+  ([plans, ready]) => {
+    if (ready && plans.length > 0) {
+      prefetchRouteInfos()
+    }
+  },
+  { deep: true, immediate: true }
+)
+
 // activeTransport 变化 → 绘制路线
 watch(
-  () => tripStore.activeTransport,
-  (transportItem) => {
+  () => [tripStore.activeTransport, tripStore.activeTransport?.mode] as const,
+  ([transportItem]) => {
     if (!amap.ready.value) return
     if (!transportItem) {
       amap.clearRoute()
       return
     }
 
-    let startLoc = null
-    let endLoc = null
-
-    for (const dp of tripStore.dayPlans) {
-      const idx = dp.items.indexOf(transportItem)
-      if (idx !== -1) {
-        if (idx > 0) {
-          startLoc = dp.items[idx - 1].location
-        } else {
-          const prevDay = tripStore.dayPlans.find(d => d.day === dp.day - 1)
-          if (prevDay && prevDay.hotel) startLoc = prevDay.hotel.location
-        }
-        
-        if (idx < dp.items.length - 1) {
-          endLoc = dp.items[idx + 1].location
-        } else if (dp.hotel) {
-          endLoc = dp.hotel.location
-        }
-        break
-      }
-    }
+    const { startLoc, endLoc } = getTransportLocations(transportItem)
 
     if (startLoc && endLoc) {
-      amap.drawRoute(startLoc, endLoc, transportItem.mode)
+      amap.drawRoute(startLoc, endLoc, transportItem.mode, (info) => {
+        // 避免 deep: true 导致的无限循环，这里明确只监听 item 和 mode 的变化
+        transportItem.routeInfo = info
+      })
     } else {
       console.warn('无法解析此交通路线的起点或终点坐标')
     }

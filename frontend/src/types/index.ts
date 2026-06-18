@@ -30,6 +30,7 @@ export interface TripItem {
   mode?: string
   from?: string
   to?: string
+  routeInfo?: { distance: number; time: number }
 }
 export interface Hotel {
   name: string

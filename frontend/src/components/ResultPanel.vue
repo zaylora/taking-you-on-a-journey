@@ -62,8 +62,25 @@
                   {{ item.from }} → {{ item.to }}
                 </div>
                 <div class="card-sub">
-                  <span v-if="item.mode" class="card-tag transport-tag">{{ item.mode }}</span>
-                  <span v-if="item.cost" class="card-cost">¥{{ item.cost }}/人</span>
+                  <div style="display:flex; align-items:center; flex-wrap:wrap; gap:4px;">
+                    <span @click.stop>
+                      <el-select
+                        v-model="item.mode"
+                        size="mini"
+                        class="transport-el-select"
+                      >
+                        <el-option label="公交/地铁" value="公交/地铁" />
+                        <el-option label="打车" value="打车" />
+                        <el-option label="驾车" value="驾车" />
+                        <el-option label="步行" value="步行" />
+                        <el-option label="骑行" value="骑行" />
+                      </el-select>
+                    </span>
+                    <span v-if="item.cost" class="card-cost" style="margin-right:8px;">¥{{ item.cost }}/人</span>
+                    <span v-if="item.routeInfo" style="font-size:11px; color:#909399;">
+                      {{ formatDistance(item.routeInfo.distance) }} · 约{{ formatTime(item.routeInfo.time) }}
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
@@ -86,7 +103,12 @@
             </div>
           </template>
 
-          <div v-if="currentDay?.hotel" class="trip-card hotel-card">
+          <div
+            v-if="currentDay?.hotel"
+            class="trip-card hotel-card"
+            :class="{ active: currentDay.hotel.poi_id === tripStore.activePoiId }"
+            @click="tripStore.setActivePoi(currentDay.hotel.poi_id)"
+          >
             <span class="card-icon">🏨</span>
             <div class="card-text">
               <div class="card-name">{{ currentDay.hotel.name }}</div>
@@ -128,6 +150,22 @@ watch(
     itemRefs.get(id)?.scrollIntoView({ behavior: 'smooth', block: 'nearest' })
   },
 )
+
+const formatDistance = (meters: number) => {
+  if (!meters) return ''
+  if (meters < 1000) return `${meters}米`
+  return `${(meters / 1000).toFixed(1)}公里`
+}
+
+const formatTime = (seconds: number) => {
+  if (!seconds) return ''
+  if (seconds < 60) return `${seconds}秒`
+  const mins = Math.floor(seconds / 60)
+  if (mins < 60) return `${mins}分钟`
+  const hours = Math.floor(mins / 60)
+  const rem = mins % 60
+  return `${hours}小时${rem}分钟`
+}
 </script>
 
 <style scoped>
@@ -212,8 +250,9 @@ watch(
   border-color: #409eff;
   box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
 }
-.hotel-card { cursor: default; background: #fafcff; border-color: #e6eefb; }
-.hotel-card:hover { border-color: #e6eefb; }
+.hotel-card { cursor: pointer; background: #fafcff; border-color: #e6eefb; }
+.hotel-card:hover { border-color: #c6e2ff; }
+.hotel-card.active { border-color: #409eff; box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2); }
 .transport-card {
   cursor: pointer;
   background: #f9f9fb;
@@ -238,4 +277,19 @@ watch(
 }
 .hotel-tag { color: #409eff; background: #ecf5ff; }
 .card-cost { font-size: 12px; color: #e6a23c; font-weight: 600; }
+.transport-el-select {
+  width: 95px;
+  margin-right: 6px;
+}
+.transport-el-select :deep(.el-select__wrapper) {
+  background-color: #f0f9eb;
+  box-shadow: none !important;
+  padding: 2px 8px;
+  min-height: 22px;
+  border-radius: 4px;
+}
+.transport-el-select :deep(.el-select__placeholder) {
+  color: #67c23a;
+  font-size: 11px;
+}
 </style>

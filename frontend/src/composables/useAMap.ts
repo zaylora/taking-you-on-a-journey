@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import type { DayPlan, LngLat } from '../types'
+import type { DayPlan, LngLat, TripItem, Hotel } from '../types'
 
 // 按天配色（循环使用）
 const DAY_COLORS = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399', '#9B59B6']
@@ -13,8 +13,8 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
   let AMap: any = null
   let map: any = null
   let infoWindow: any = null
-  // poi_id -> { marker, item, day }
-  const markerMap = new Map<string, { marker: any; name: string; day: number }>()
+  // poi_id -> { marker, name, item, hotel, day }
+  const markerMap = new Map<string, { marker: any; name: string; item?: TripItem; hotel?: Hotel; day: number }>()
   let markerClickCb: ((poiId: string) => void) | null = null
   let routeInstance: any = null
 
@@ -32,7 +32,7 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
       AMap = await AMapLoader.load({
         key,
         version: '2.0',
-        plugins: ['AMap.InfoWindow', 'AMap.Driving', 'AMap.Transfer', 'AMap.Walking'],
+        plugins: ['AMap.InfoWindow', 'AMap.Driving', 'AMap.Transfer', 'AMap.Walking', 'AMap.PlaceSearch'],
       })
       if (!containerRef.value) {
         error.value = '地图容器未就绪'
@@ -42,7 +42,10 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
         zoom: 11,
         viewMode: '2D',
       })
-      infoWindow = new AMap.InfoWindow({ offset: new AMap.Pixel(0, -30) })
+      infoWindow = new AMap.InfoWindow({ 
+        offset: new AMap.Pixel(0, -30),
+        autoMove: false 
+      })
       ready.value = true
     } catch (e: any) {
       error.value = '地图加载失败：' + (e?.message || String(e))
@@ -79,8 +82,28 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
           if (markerClickCb) markerClickCb(item.poi_id)
         })
         map.add(marker)
-        markerMap.set(item.poi_id, { marker, name: item.name, day: dp.day })
+        markerMap.set(item.poi_id, { marker, name: item.name, item, day: dp.day })
         allMarkers.push(marker)
+      }
+      
+      if (dp.hotel) {
+        const { lng, lat } = dp.hotel.location
+        if (typeof lng === 'number' && typeof lat === 'number') {
+          const color = dayColor(dp.day)
+          const content = `<div class="amap-dot" style="background:${color};opacity:${isActive ? 1 : 0.35};border-radius:2px;width:12px;height:12px;" title="${dp.hotel.name}"></div>`
+          const marker = new AMap.Marker({
+            position: [lng, lat],
+            content,
+            offset: new AMap.Pixel(-6, -6),
+            zIndex: isActive ? 130 : 80,
+          })
+          marker.on('click', () => {
+            if (markerClickCb) markerClickCb(dp.hotel!.poi_id)
+          })
+          map.add(marker)
+          markerMap.set(dp.hotel.poi_id, { marker, name: dp.hotel.name, hotel: dp.hotel, day: dp.day })
+          allMarkers.push(marker)
+        }
       }
     }
     if (allMarkers.length > 0) map.setFitView(allMarkers, false, [60, 60, 60, 60])
@@ -94,12 +117,41 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     const hit = markerMap.get(poiId)
     if (!hit) return
     const pos = hit.marker.getPosition()
-    map.setCenter(pos)
-    if (map.getZoom() < 13) map.setZoom(13)
-    infoWindow.setContent(
-      `<div style="padding:4px 8px;font-size:13px;font-weight:600;">${hit.name}</div>`,
-    )
+    
+    const targetZoom = Math.max(map.getZoom(), 14)
+    map.setZoomAndCenter(targetZoom, pos)
+    // 向下偏移120像素，使得弹出的 InfoWindow 正好在视口中间
+    map.panBy(0, -120)
+
+    let html = `<div style="padding:4px 8px;font-size:13px;width:240px;line-height:1.5;">`
+    html += `<!-- img-placeholder -->`
+    html += `<div style="font-weight:600;font-size:14px;margin-bottom:4px;">${hit.name}</div>`
+    
+    if (hit.item) {
+      if (hit.item.cost) html += `<div style="color:#e6a23c;font-size:12px;margin-bottom:4px;">预计花费: ¥${hit.item.cost}</div>`
+      if (hit.item.note) html += `<div style="color:#606266;font-size:12px;white-space:pre-wrap;">${hit.item.note}</div>`
+    } else if (hit.hotel) {
+      if (hit.hotel.level) html += `<div style="color:#409eff;font-size:12px;margin-bottom:4px;">${hit.hotel.level}</div>`
+      if (hit.hotel.price) html += `<div style="color:#e6a23c;font-size:12px;margin-bottom:4px;">参考价: ¥${hit.hotel.price}/晚</div>`
+    }
+
+    html += `</div>`
+    infoWindow.setContent(html)
     infoWindow.open(map, pos)
+
+    // 异步拉取高德地点详情获取图片
+    const placeSearch = new AMap.PlaceSearch({ extensions: 'all' })
+    placeSearch.getDetails(poiId, (status: string, result: any) => {
+      if (status === 'complete' && result.info === 'OK') {
+        const poi = result.poiList.pois[0]
+        if (poi && poi.photos && poi.photos.length > 0) {
+          const imgUrl = poi.photos[0].url
+          const imgHtml = `<img src="${imgUrl}" style="width:100%; height:120px; object-fit:cover; border-radius:6px; margin-bottom:8px; display:block;" />`
+          const newHtml = html.replace('<!-- img-placeholder -->', imgHtml)
+          infoWindow.setContent(newHtml)
+        }
+      }
+    })
   }
 
   const onMarkerClick = (cb: (poiId: string) => void): void => {
@@ -113,7 +165,7 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     }
   }
 
-  const drawRoute = (start: LngLat, end: LngLat, modeStr: string = '') => {
+  const drawRoute = (start: LngLat, end: LngLat, modeStr: string = '', onComplete?: (info: {distance: number, time: number}) => void) => {
     if (!map || !AMap) return
     clearRoute()
     
@@ -129,6 +181,11 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
           (status: string, result: any) => {
             if (status !== 'complete') {
               console.warn('路线规划未完成或失败:', result)
+            } else if (onComplete) {
+              const plan = result.plans ? result.plans[0] : (result.routes ? result.routes[0] : null)
+              if (plan) {
+                onComplete({ distance: plan.distance, time: plan.time })
+              }
             }
           }
         )
@@ -150,6 +207,49 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     }
   }
 
+  const fetchRouteInfo = (start: LngLat, end: LngLat, modeStr: string = ''): Promise<{distance: number, time: number} | null> => {
+    return new Promise((resolve) => {
+      if (!AMap) return resolve(null)
+      
+      let PluginClass = AMap.Driving
+      let pluginOptions: any = {}
+
+      const execSearch = () => {
+        try {
+          const instance = new PluginClass(pluginOptions)
+          instance.search(
+            [start.lng, start.lat],
+            [end.lng, end.lat],
+            (status: string, result: any) => {
+              if (status === 'complete') {
+                const plan = result.plans ? result.plans[0] : (result.routes ? result.routes[0] : null)
+                if (plan) {
+                  resolve({ distance: plan.distance, time: plan.time })
+                  return
+                }
+              }
+              resolve(null)
+            }
+          )
+        } catch (e) {
+          console.error('获取路线数据异常:', e)
+          resolve(null)
+        }
+      }
+
+      if (modeStr.includes('公交') || modeStr.includes('地铁')) {
+        PluginClass = AMap.Transfer
+        map.getCity((info: any) => {
+          pluginOptions.city = info.city || info.province || '深圳市'
+          execSearch()
+        })
+      } else {
+        if (modeStr.includes('步行')) PluginClass = AMap.Walking
+        execSearch()
+      }
+    })
+  }
+
   const destroy = (): void => {
     clearRoute()
     clearMarkers()
@@ -157,5 +257,5 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     ready.value = false
   }
 
-  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, destroy, drawRoute, clearRoute }
+  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, destroy, drawRoute, clearRoute, fetchRouteInfo }
 }
