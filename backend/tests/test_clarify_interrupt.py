@@ -11,7 +11,7 @@ def _stub_except_clarify(monkeypatch):
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
     from tests.conftest import make_fake_build_llm
 
-    async def eval_gaps(state):
+    async def eval_gaps(state, config=None):
         if state.get("clarify_history"):
             return []  # 已答 → 放行
         return [Gap(field="city", question="去哪个城市？", options=["成都", "北京"])]

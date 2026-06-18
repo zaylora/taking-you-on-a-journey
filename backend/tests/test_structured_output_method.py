@@ -29,13 +29,13 @@ async def test_structured_outputs_use_function_calling(monkeypatch, module_name,
         from app.graph.nodes.clarify import ClarifyGaps
 
         result = ClarifyGaps(gaps=[])
-        args = (state,)
+        args = (state, None)
     elif result_factory == "dispatch":
         from app.graph.nodes import dispatch as mod
         from app.graph.nodes.dispatch import NormalizedReq
 
         result = NormalizedReq(city="成都", days=3)
-        args = (state,)
+        args = (state, None)
     else:
         from app.graph.nodes import itinerary as mod
         from app.graph.nodes.itinerary import DayPlans

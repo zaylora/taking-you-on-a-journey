@@ -9,7 +9,7 @@ async def test_dispatch_fills_top_level_fields(monkeypatch):
     req = NormalizedReq(city="成都", start_date="2026-07-01", days=3, num_people=2,
                         preferences={"food": "辣"}, budget=2000.0)
     monkeypatch.setattr(d_mod, "build_llm", make_fake_build_llm(structured=req))
-    out = await d_mod.dispatch({"query": "成都3天2人爱吃辣预算2000", "clarify_history": []})
+    out = await d_mod.dispatch({"query": "成都3天2人爱吃辣预算2000", "clarify_history": []}, None)
     assert out["city"] == "成都" and out["days"] == 3 and out["num_people"] == 2
     assert out["normalized_req"]["city"] == "成都"
     assert out["messages"]  # 追加了消息

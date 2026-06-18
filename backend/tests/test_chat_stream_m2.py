@@ -9,7 +9,7 @@ def _stub_nodes(monkeypatch):
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
     from tests.conftest import make_fake_build_llm
 
-    async def no_gaps(_state):
+    async def no_gaps(_state, _config=None):
         return []
     monkeypatch.setattr(c, "_evaluate_gaps", no_gaps)
     monkeypatch.setattr(d, "build_llm", make_fake_build_llm(

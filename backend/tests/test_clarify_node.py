@@ -14,7 +14,7 @@ async def test_no_gaps_passes_through(monkeypatch):
     from tests.conftest import make_fake_build_llm
     monkeypatch.setattr(clarify_mod, "build_llm",
                         make_fake_build_llm(structured=ClarifyGaps(gaps=[])))
-    out = await clarify_mod.clarify({"query": "成都3天2人爱吃辣预算2000", "clarify_round": 0})
+    out = await clarify_mod.clarify({"query": "成都3天2人爱吃辣预算2000", "clarify_round": 0}, None)
     assert out == {"clarified": True}
 
 
@@ -24,5 +24,5 @@ async def test_round_cap_forces_passthrough(monkeypatch):
     # 即使 LLM 还想追问，到达上限也直接放行
     monkeypatch.setattr(clarify_mod, "build_llm", make_fake_build_llm(
         structured=ClarifyGaps(gaps=[Gap(field="budget", question="预算？", options=[])])))
-    out = await clarify_mod.clarify({"query": "x", "clarify_round": 4})
+    out = await clarify_mod.clarify({"query": "x", "clarify_round": 4}, None)
     assert out == {"clarified": True}
