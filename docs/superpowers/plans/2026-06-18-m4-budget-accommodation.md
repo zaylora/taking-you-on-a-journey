@@ -771,7 +771,7 @@ def _stub(monkeypatch, *, item_cost, hotel_price, budget_limit, days=2, num_peop
     from app.graph.nodes.accommodation import _AccoResult, _HotelForDay
     from tests.conftest import make_fake_build_llm
 
-    async def no_gaps(_state):
+    async def no_gaps(_state, _config=None):
         return []
     monkeypatch.setattr(c, "_evaluate_gaps", no_gaps)
     monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
