@@ -8,7 +8,9 @@
         :effect="status === 'done' ? 'plain' : 'dark'"
         size="small"
         class="node-tag"
-      >{{ labelOf(node) }}</el-tag>
+      >
+        {{ status === 'running' ? '正在' : '' }}{{ labelOf(node) }}{{ status === 'running' ? '...' : '' }}
+      </el-tag>
     </div>
   </div>
 </template>
@@ -29,7 +31,7 @@ const labelOf = (n: string) => tripStore.nodeLabels[n] || LABELS[n] || n
 </script>
 
 <style scoped>
-.agent-progress { padding: 8px 0; min-height: 24px; }
+.agent-progress { padding: 4px 0; min-height: 24px; }
 .progress-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .node-tag { transition: all .3s; }
 </style>

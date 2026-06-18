@@ -2,9 +2,8 @@
   <div class="chat-panel">
     <div class="header">
       <h2>AI 旅游助手</h2>
-      <AgentProgress />
     </div>
-    <MessageList :messages="tripStore.messages" />
+    <MessageList :messages="tripStore.messages" :loading="loading" />
     <div class="quick-prompts" v-if="!loading && tripStore.messages.length > 0">
       <el-tag round type="info" class="prompt-chip" @click="send('预算大概多少？')">预算大概多少？</el-tag>
       <el-tag round type="info" class="prompt-chip" @click="send('推荐一些当地美食')">推荐一些当地美食</el-tag>
@@ -20,7 +19,6 @@ import { useTripStore } from '../stores/trip'
 import { useSSE } from '../composables/useSSE'
 import MessageList from './MessageList.vue'
 import ChatInput from './ChatInput.vue'
-import AgentProgress from './AgentProgress.vue'
 import ClarifyOptions from './ClarifyOptions.vue'
 
 const tripStore = useTripStore()

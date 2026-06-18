@@ -16,7 +16,7 @@ export const useTripStore = defineStore('trip', () => {
   const dayPlans = ref<any[]>([])
   const clarifyPending = ref<ClarifyPayload | null>(null)
 
-  const addMessage = (role: 'user' | 'assistant', content: string, kind: 'text' | 'clarify' = 'text') => {
+  const addMessage = (role: 'user' | 'assistant', content: string, kind: 'text' | 'clarify' | 'error' = 'text') => {
     messages.value.push({ role, content, kind })
   }
   const appendToLastMessage = (text: string) => {

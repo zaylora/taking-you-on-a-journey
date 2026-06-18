@@ -9,23 +9,43 @@
         {{ msg.role === 'user' ? 'U' : 'AI' }}
       </div>
       <div class="content" :class="{ 'clarify-bubble': msg.kind === 'clarify' }">
-        <pre>{{ msg.content }}</pre>
+        <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+      </div>
+    </div>
+    
+    <div v-if="hasProgress && loading" class="message assistant">
+      <div class="avatar">AI</div>
+      <div class="content progress-bubble">
+        <AgentProgress />
       </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, nextTick } from 'vue'
+import { ref, watch, nextTick, computed } from 'vue'
+import MarkdownIt from 'markdown-it'
 import type { Message } from '../stores/trip'
+import { useTripStore } from '../stores/trip'
+import AgentProgress from './AgentProgress.vue'
 
 const props = defineProps<{
-  messages: Message[]
+  messages: Message[],
+  loading: boolean
 }>()
+
+const md = new MarkdownIt({ breaks: true, linkify: true })
+
+const renderMarkdown = (text: string | undefined) => {
+  return md.render(text || '')
+}
+
+const tripStore = useTripStore()
+const hasProgress = computed(() => Object.keys(tripStore.agentProgress).length > 0)
 
 const listRef = ref<HTMLElement | null>(null)
 
-watch(() => props.messages, () => {
+watch([() => props.messages, hasProgress, () => props.loading], () => {
   nextTick(() => {
     if (listRef.value) {
       listRef.value.scrollTop = listRef.value.scrollHeight
@@ -73,16 +93,70 @@ watch(() => props.messages, () => {
   background: #f4f4f5;
   font-size: 14px;
   line-height: 1.5;
-  white-space: pre-wrap;
   word-break: break-word;
-}
-.content pre {
-  margin: 0;
-  white-space: pre-wrap;
-  font-family: inherit;
 }
 .message.user .content {
   background: #ecf5ff;
 }
 .content.clarify-bubble { background: #fdf6ec; border: 1px solid #f5dab1; color: #b88230; }
+.progress-bubble { background: transparent; padding: 0; }
+
+/* Markdown Styles */
+:deep(.markdown-body p) {
+  margin: 0 0 8px 0;
+}
+:deep(.markdown-body p:last-child) {
+  margin-bottom: 0;
+}
+:deep(.markdown-body pre) {
+  background-color: #282c34;
+  color: #abb2bf;
+  padding: 12px;
+  border-radius: 6px;
+  overflow-x: auto;
+  margin: 8px 0;
+}
+:deep(.markdown-body code) {
+  background-color: rgba(0, 0, 0, 0.05);
+  padding: 2px 4px;
+  border-radius: 4px;
+  font-family: monospace;
+}
+:deep(.markdown-body pre code) {
+  background-color: transparent;
+  padding: 0;
+  color: inherit;
+}
+:deep(.markdown-body ul), :deep(.markdown-body ol) {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+:deep(.markdown-body li) {
+  margin-bottom: 4px;
+}
+:deep(.markdown-body blockquote) {
+  border-left: 4px solid #dcdfe6;
+  margin: 8px 0;
+  padding-left: 12px;
+  color: #606266;
+}
+:deep(.markdown-body table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+:deep(.markdown-body th), :deep(.markdown-body td) {
+  border: 1px solid #dcdfe6;
+  padding: 6px 12px;
+}
+:deep(.markdown-body h1), :deep(.markdown-body h2), :deep(.markdown-body h3), 
+:deep(.markdown-body h4), :deep(.markdown-body h5), :deep(.markdown-body h6) {
+  margin: 12px 0 8px 0;
+  font-weight: 600;
+}
+:deep(.markdown-body h1:first-child), :deep(.markdown-body h2:first-child), 
+:deep(.markdown-body h3:first-child), :deep(.markdown-body h4:first-child), 
+:deep(.markdown-body h5:first-child), :deep(.markdown-body h6:first-child) {
+  margin-top: 0;
+}
 </style>
