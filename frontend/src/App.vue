@@ -6,11 +6,9 @@
       <div class="chat-section">
         <ChatPanel />
       </div>
-      <div class="map-section">
+      <div class="map-area">
         <MapView />
-        <div class="map-overlays">
-          <ResultPanel />
-        </div>
+        <ResultPanel />
       </div>
     </div>
   </div>
@@ -60,22 +58,11 @@ html, body, #app {
   z-index: 5;
 }
 
-.map-section {
-  flex: 1;
+.map-area {
   position: relative;
-  display: flex;
-  flex-direction: column;
-}
-
-.map-overlays {
-  position: absolute;
-  bottom: 0;
-  left: 0;
-  right: 0;
-  padding: 24px;
-  pointer-events: none; /* Let clicks pass through to map where there are no overlays */
-}
-.map-overlays > * {
-  pointer-events: auto;
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
 }
 </style>
