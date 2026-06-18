@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
-import type { ClarifyPayload, DayPlan, Budget } from '../types'
+import type { ClarifyPayload, DayPlan, Budget, TripItem } from '../types'
 
 export interface Message {
   role: 'user' | 'assistant'
@@ -16,6 +16,7 @@ export const useTripStore = defineStore('trip', () => {
   const dayPlans = ref<DayPlan[]>([])
   const activeDay = ref<number | null>(null)
   const activePoiId = ref<string | null>(null)
+  const activeTransport = ref<TripItem | null>(null)
   const clarifyPending = ref<ClarifyPayload | null>(null)
   const budget = ref<Budget | null>(null)
 
@@ -51,17 +52,29 @@ export const useTripStore = defineStore('trip', () => {
     } else {
       activeDay.value = null
       activePoiId.value = null
+      activeTransport.value = null
       budget.value = null
     }
   }
-  const setActiveDay = (d: number | null) => { activeDay.value = d }
-  const setActivePoi = (id: string | null) => { activePoiId.value = id }
+  const setActiveDay = (d: number | null) => {
+    activeDay.value = d
+    activePoiId.value = null
+    activeTransport.value = null
+  }
+  const setActivePoi = (id: string | null) => {
+    activePoiId.value = id
+    if (id) activeTransport.value = null
+  }
+  const setActiveTransport = (item: TripItem | null) => {
+    activeTransport.value = item
+    if (item) activePoiId.value = null
+  }
   const setBudget = (b: Budget | null) => { budget.value = b }
 
   return {
     messages, agentProgress, nodeLabels, threadId, dayPlans, clarifyPending,
-    activeDay, activePoiId, budget,
+    activeDay, activePoiId, activeTransport, budget,
     addMessage, appendToLastMessage, startNode, endNode, clearProgress,
-    setThreadId, setClarify, clearClarify, setDayPlans, setActiveDay, setActivePoi, setBudget,
+    setThreadId, setClarify, clearClarify, setDayPlans, setActiveDay, setActivePoi, setActiveTransport, setBudget,
   }
 })

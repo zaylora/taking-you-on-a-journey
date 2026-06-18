@@ -50,7 +50,12 @@
         <div class="timeline">
           <template v-for="(item, idx) in (currentDay?.items || []).filter(i => i.type === 'transport' || i.name)" :key="item.poi_id || idx">
             <!-- 交通条目：显示为紧凑连接行 -->
-            <div v-if="item.type === 'transport'" class="trip-card transport-card">
+            <div
+              v-if="item.type === 'transport'"
+              class="trip-card transport-card"
+              :class="{ active: item === tripStore.activeTransport }"
+              @click="tripStore.setActiveTransport(item)"
+            >
               <span class="card-icon">🚌</span>
               <div class="card-text">
                 <div class="card-name transport-name">
@@ -210,13 +215,13 @@ watch(
 .hotel-card { cursor: default; background: #fafcff; border-color: #e6eefb; }
 .hotel-card:hover { border-color: #e6eefb; }
 .transport-card {
-  cursor: default;
+  cursor: pointer;
   background: #f9f9fb;
   border-color: #ebebf0;
   padding: 6px 10px;
   opacity: 0.85;
 }
-.transport-card:hover { border-color: #ebebf0; }
+.transport-card:hover { border-color: #c6e2ff; }
 .transport-name { font-size: 12px; color: #606266; font-weight: 400; }
 .transport-tag { color: #909399; background: #f4f4f5; }
 .card-icon { font-size: 16px; line-height: 1.4; }

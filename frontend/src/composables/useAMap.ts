@@ -1,6 +1,6 @@
 import { ref, type Ref } from 'vue'
 import AMapLoader from '@amap/amap-jsapi-loader'
-import type { DayPlan } from '../types'
+import type { DayPlan, LngLat } from '../types'
 
 // 按天配色（循环使用）
 const DAY_COLORS = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399', '#9B59B6']
@@ -16,6 +16,7 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
   // poi_id -> { marker, item, day }
   const markerMap = new Map<string, { marker: any; name: string; day: number }>()
   let markerClickCb: ((poiId: string) => void) | null = null
+  let routeInstance: any = null
 
   const init = async (): Promise<void> => {
     const key = import.meta.env.VITE_AMAP_JS_KEY as string | undefined
@@ -31,7 +32,7 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
       AMap = await AMapLoader.load({
         key,
         version: '2.0',
-        plugins: ['AMap.InfoWindow'],
+        plugins: ['AMap.InfoWindow', 'AMap.Driving', 'AMap.Transfer', 'AMap.Walking'],
       })
       if (!containerRef.value) {
         error.value = '地图容器未就绪'
@@ -105,11 +106,56 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     markerClickCb = cb
   }
 
+  const clearRoute = () => {
+    if (routeInstance) {
+      routeInstance.clear()
+      routeInstance = null
+    }
+  }
+
+  const drawRoute = (start: LngLat, end: LngLat, modeStr: string = '') => {
+    if (!map || !AMap) return
+    clearRoute()
+    
+    let PluginClass = AMap.Driving
+    let pluginOptions: any = { map: map }
+
+    const execSearch = () => {
+      try {
+        routeInstance = new PluginClass(pluginOptions)
+        routeInstance.search(
+          [start.lng, start.lat],
+          [end.lng, end.lat],
+          (status: string, result: any) => {
+            if (status !== 'complete') {
+              console.warn('路线规划未完成或失败:', result)
+            }
+          }
+        )
+      } catch (e) {
+        console.error('绘制路线异常:', e)
+      }
+    }
+
+    if (modeStr.includes('公交') || modeStr.includes('地铁')) {
+      PluginClass = AMap.Transfer
+      // 高德公交规划必须指定城市，动态获取当前地图中心所在城市
+      map.getCity((info: any) => {
+        pluginOptions.city = info.city || info.province || '深圳市'
+        execSearch()
+      })
+    } else {
+      if (modeStr.includes('步行')) PluginClass = AMap.Walking
+      execSearch()
+    }
+  }
+
   const destroy = (): void => {
+    clearRoute()
     clearMarkers()
     if (map) { map.destroy(); map = null }
     ready.value = false
   }
 
-  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, destroy }
+  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, destroy, drawRoute, clearRoute }
 }

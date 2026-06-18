@@ -46,6 +46,46 @@ watch(
   () => tripStore.activePoiId,
   (id) => { if (amap.ready.value) amap.focusPoi(id) },
 )
+
+// activeTransport 变化 → 绘制路线
+watch(
+  () => tripStore.activeTransport,
+  (transportItem) => {
+    if (!amap.ready.value) return
+    if (!transportItem) {
+      amap.clearRoute()
+      return
+    }
+
+    let startLoc = null
+    let endLoc = null
+
+    for (const dp of tripStore.dayPlans) {
+      const idx = dp.items.indexOf(transportItem)
+      if (idx !== -1) {
+        if (idx > 0) {
+          startLoc = dp.items[idx - 1].location
+        } else {
+          const prevDay = tripStore.dayPlans.find(d => d.day === dp.day - 1)
+          if (prevDay && prevDay.hotel) startLoc = prevDay.hotel.location
+        }
+        
+        if (idx < dp.items.length - 1) {
+          endLoc = dp.items[idx + 1].location
+        } else if (dp.hotel) {
+          endLoc = dp.hotel.location
+        }
+        break
+      }
+    }
+
+    if (startLoc && endLoc) {
+      amap.drawRoute(startLoc, endLoc, transportItem.mode)
+    } else {
+      console.warn('无法解析此交通路线的起点或终点坐标')
+    }
+  }
+)
 </script>
 
 <style scoped>
