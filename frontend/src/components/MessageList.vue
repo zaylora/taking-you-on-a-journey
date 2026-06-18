@@ -8,7 +8,7 @@
       <div class="avatar">
         {{ msg.role === 'user' ? 'U' : 'AI' }}
       </div>
-      <div class="content">
+      <div class="content" :class="{ 'clarify-bubble': msg.kind === 'clarify' }">
         <pre>{{ msg.content }}</pre>
       </div>
     </div>
@@ -84,4 +84,5 @@ watch(() => props.messages, () => {
 .message.user .content {
   background: #ecf5ff;
 }
+.content.clarify-bubble { background: #fdf6ec; border: 1px solid #f5dab1; color: #b88230; }
 </style>
