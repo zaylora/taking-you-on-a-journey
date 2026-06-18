@@ -30,10 +30,15 @@ class Settings(BaseSettings):
     # 高德 Web 服务（后端代理，Key 不下发前端）
     amap_web_key: SecretStr = SecretStr("")
 
+    # LangSmith 追踪（可选；设 LANGCHAIN_TRACING_V2=true 启用）
+    langchain_tracing_v2: bool = False
+    langchain_api_key: SecretStr = SecretStr("")
+    langchain_project: str = "trip-planner"
+    langchain_endpoint: str = "https://api.smith.langchain.com"
+
     # 前端直连需放行的源（开发期 Vite 默认 5173）。
     # 如需用环境变量 CORS_ORIGINS 覆盖，须传 JSON 数组字符串，例如：
-    #   CORS_ORIGINS=["http://localhost:5173","https://example.com"]
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    cors_origins: list[str] = ["*"]
 
     def active_api_key(self) -> str:
         """返回当前 provider 的明文 Key（仅供启动校验/构造 SDK 用，勿记日志）。"""

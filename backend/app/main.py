@@ -4,6 +4,7 @@
 - 开 CORSMiddleware：前端直连后端（不走 Vite proxy），放行 settings.cors_origins。
   POST application/json 触发的预检 OPTIONS 由该中间件自动处理。
 """
+import os
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -25,6 +26,14 @@ async def lifespan(app: FastAPI):
         )
     if not settings.amap_web_key.get_secret_value():
         raise RuntimeError("缺少 AMAP_WEB_KEY，请在 backend/.env 中配置后再启动。")
+
+    # —— LangSmith 追踪（pydantic-settings 读 .env，但 LangChain 直接读 os.environ）——
+    if settings.langchain_tracing_v2:
+        os.environ["LANGCHAIN_TRACING_V2"] = "true"
+        os.environ["LANGCHAIN_API_KEY"] = settings.langchain_api_key.get_secret_value()
+        os.environ["LANGCHAIN_PROJECT"] = settings.langchain_project
+        os.environ["LANGCHAIN_ENDPOINT"] = settings.langchain_endpoint
+
     yield
 
 
