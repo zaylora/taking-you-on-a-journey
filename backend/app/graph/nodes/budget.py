@@ -12,6 +12,8 @@ _MAX_RETRY = 2
 def _sum_costs(day_plans: list, num_people: int) -> dict:
     """汇总 breakdown（人均项已 ×人数）与总额 estimated。纯函数。"""
     ticket = food = transport = hotel = 0.0
+    days_list = sorted(d.get("day", 0) for d in day_plans)
+    overnight = set(days_list[:-1]) if len(days_list) > 1 else set()
     for d in day_plans:
         for it in d.get("items", []) or []:
             c = it.get("cost", 0.0) or 0.0
@@ -23,7 +25,7 @@ def _sum_costs(day_plans: list, num_people: int) -> dict:
             elif t == "transport":
                 transport += c
         h = d.get("hotel")
-        if h:
+        if h and d.get("day", 0) in overnight:
             hotel += h.get("price", 0.0) or 0.0
     n = max(1, num_people)
     breakdown = {

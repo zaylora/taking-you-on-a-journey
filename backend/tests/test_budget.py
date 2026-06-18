@@ -18,8 +18,8 @@ def test_sum_costs_classifies_and_multiplies_by_people():
     dps = [_day(1, [_item("attraction", "A", 100), _item("meal", "M", 50),
                     _item("transport", "", 10)], hotel={"price": 400})]
     s = _sum_costs(dps, num_people=2)
-    assert s["breakdown"] == {"ticket": 200, "food": 100, "transport": 20, "hotel": 400}
-    assert s["estimated"] == 720  # (100+50+10)*2 + 400
+    assert s["breakdown"] == {"ticket": 200, "food": 100, "transport": 20, "hotel": 0}
+    assert s["estimated"] == 320  # (100+50+10)*2 + 0（单日无过夜）
 
 
 def test_under_budget_no_over_no_retry():
