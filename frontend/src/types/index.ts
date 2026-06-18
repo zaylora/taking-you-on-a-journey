@@ -18,12 +18,18 @@ export interface ClarifyPayload { field: string; question: string; options: stri
 export interface LngLat { lng: number; lat: number }
 export interface DayWeather { text: string; temp: string; is_rainy: boolean; source: string }
 export interface TripItem {
-  type: 'attraction' | 'meal'
+  type: 'attraction' | 'meal' | 'transport'
   name: string
   poi_id: string
   location: LngLat
-  indoor?: boolean        // 仅 attraction 有
-  cost?: number           // 人均花费(元)，M4
+  indoor?: boolean
+  cost?: number
+  start?: string
+  end?: string
+  note?: string
+  mode?: string
+  from?: string
+  to?: string
 }
 export interface Hotel {
   name: string

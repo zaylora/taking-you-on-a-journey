@@ -48,23 +48,38 @@
         </div>
 
         <div class="timeline">
-          <div
-            v-for="item in currentDay?.items || []"
-            :key="item.poi_id"
-            :ref="(el) => setItemRef(item.poi_id, el)"
-            class="trip-card"
-            :class="{ active: item.poi_id === tripStore.activePoiId }"
-            @click="tripStore.setActivePoi(item.poi_id)"
-          >
-            <span class="card-icon">{{ item.type === 'meal' ? '🍴' : '📍' }}</span>
-            <div class="card-text">
-              <div class="card-name">{{ item.name }}</div>
-              <div class="card-sub">
-                <span v-if="item.type === 'attraction' && item.indoor" class="card-tag">室内</span>
-                <span v-if="item.cost" class="card-cost">¥{{ item.cost }}/人</span>
+          <template v-for="(item, idx) in (currentDay?.items || []).filter(i => i.type === 'transport' || i.name)" :key="item.poi_id || idx">
+            <!-- 交通条目：显示为紧凑连接行 -->
+            <div v-if="item.type === 'transport'" class="trip-card transport-card">
+              <span class="card-icon">🚌</span>
+              <div class="card-text">
+                <div class="card-name transport-name">
+                  {{ item.from }} → {{ item.to }}
+                </div>
+                <div class="card-sub">
+                  <span v-if="item.mode" class="card-tag transport-tag">{{ item.mode }}</span>
+                  <span v-if="item.cost" class="card-cost">¥{{ item.cost }}/人</span>
+                </div>
               </div>
             </div>
-          </div>
+            <!-- 景点 / 餐饮条目 -->
+            <div
+              v-else
+              :ref="(el) => setItemRef(item.poi_id, el)"
+              class="trip-card"
+              :class="{ active: item.poi_id === tripStore.activePoiId }"
+              @click="tripStore.setActivePoi(item.poi_id)"
+            >
+              <span class="card-icon">{{ item.type === 'meal' ? '🍴' : '📍' }}</span>
+              <div class="card-text">
+                <div class="card-name">{{ item.name }}</div>
+                <div class="card-sub">
+                  <span v-if="item.type === 'attraction' && item.indoor" class="card-tag">室内</span>
+                  <span v-if="item.cost" class="card-cost">¥{{ item.cost }}/人</span>
+                </div>
+              </div>
+            </div>
+          </template>
 
           <div v-if="currentDay?.hotel" class="trip-card hotel-card">
             <span class="card-icon">🏨</span>
@@ -194,6 +209,16 @@ watch(
 }
 .hotel-card { cursor: default; background: #fafcff; border-color: #e6eefb; }
 .hotel-card:hover { border-color: #e6eefb; }
+.transport-card {
+  cursor: default;
+  background: #f9f9fb;
+  border-color: #ebebf0;
+  padding: 6px 10px;
+  opacity: 0.85;
+}
+.transport-card:hover { border-color: #ebebf0; }
+.transport-name { font-size: 12px; color: #606266; font-weight: 400; }
+.transport-tag { color: #909399; background: #f4f4f5; }
 .card-icon { font-size: 16px; line-height: 1.4; }
 .card-text { flex: 1; min-width: 0; }
 .card-name { font-size: 14px; color: #303133; font-weight: 500; }
