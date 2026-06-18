@@ -51,6 +51,7 @@ export const useTripStore = defineStore('trip', () => {
     } else {
       activeDay.value = null
       activePoiId.value = null
+      budget.value = null
     }
   }
   const setActiveDay = (d: number | null) => { activeDay.value = d }
