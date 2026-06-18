@@ -10,6 +10,26 @@
       </div>
 
       <template v-else>
+        <div v-if="tripStore.budget" class="budget-bar" :class="{ over: tripStore.budget.over }">
+          <div class="budget-head">
+            <span class="budget-total">已估 ¥{{ tripStore.budget.estimated }}</span>
+            <span v-if="tripStore.budget.limit > 0" class="budget-limit">
+              / 预算 ¥{{ tripStore.budget.limit }}
+            </span>
+          </div>
+          <div v-if="tripStore.budget.over" class="budget-warn">
+            ⚠ 超支 ¥{{ Math.round(tripStore.budget.estimated - tripStore.budget.limit) }}
+            （已自动重排 {{ tripStore.budget.retry_count }} 次）
+          </div>
+          <div v-if="tripStore.budget.note" class="budget-note">{{ tripStore.budget.note }}</div>
+          <div class="budget-breakdown">
+            <span>门票 ¥{{ tripStore.budget.breakdown.ticket }}</span>
+            <span>住宿 ¥{{ tripStore.budget.breakdown.hotel }}</span>
+            <span>餐饮 ¥{{ tripStore.budget.breakdown.food }}</span>
+            <span>交通 ¥{{ tripStore.budget.breakdown.transport }}</span>
+          </div>
+        </div>
+
         <div class="day-tabs">
           <button
             v-for="dp in tripStore.dayPlans"
@@ -39,7 +59,21 @@
             <span class="card-icon">{{ item.type === 'meal' ? '🍴' : '📍' }}</span>
             <div class="card-text">
               <div class="card-name">{{ item.name }}</div>
-              <div v-if="item.type === 'attraction' && item.indoor" class="card-tag">室内</div>
+              <div class="card-sub">
+                <span v-if="item.type === 'attraction' && item.indoor" class="card-tag">室内</span>
+                <span v-if="item.cost" class="card-cost">¥{{ item.cost }}/人</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="currentDay?.hotel" class="trip-card hotel-card">
+            <span class="card-icon">🏨</span>
+            <div class="card-text">
+              <div class="card-name">{{ currentDay.hotel.name }}</div>
+              <div class="card-sub">
+                <span v-if="currentDay.hotel.level" class="card-tag hotel-tag">{{ currentDay.hotel.level }}</span>
+                <span class="card-cost">¥{{ currentDay.hotel.price }}/晚</span>
+              </div>
             </div>
           </div>
         </div>
@@ -107,6 +141,28 @@ watch(
 .toggle-btn:hover { background: #ecf5ff; color: #409eff; }
 .panel-body { flex: 1; overflow-y: auto; padding: 8px 12px 12px; }
 .empty { color: #909399; font-size: 13px; text-align: center; padding: 24px 0; }
+
+.budget-bar {
+  background: #f4f9f0;
+  border: 1px solid #e1f3d8;
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-bottom: 10px;
+}
+.budget-bar.over { background: #fef0f0; border-color: #fde2e2; }
+.budget-head { font-size: 14px; font-weight: 600; color: #303133; }
+.budget-limit { color: #909399; font-weight: 400; font-size: 12px; }
+.budget-warn { margin-top: 4px; font-size: 12px; color: #f56c6c; font-weight: 600; }
+.budget-note { margin-top: 4px; font-size: 12px; color: #e6a23c; }
+.budget-breakdown {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #606266;
+}
+
 .day-tabs { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .day-tab {
   border: 1px solid #dcdfe6;
@@ -136,16 +192,20 @@ watch(
   border-color: #409eff;
   box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
 }
+.hotel-card { cursor: default; background: #fafcff; border-color: #e6eefb; }
+.hotel-card:hover { border-color: #e6eefb; }
 .card-icon { font-size: 16px; line-height: 1.4; }
 .card-text { flex: 1; min-width: 0; }
 .card-name { font-size: 14px; color: #303133; font-weight: 500; }
+.card-sub { display: flex; align-items: center; gap: 6px; margin-top: 4px; }
 .card-tag {
   display: inline-block;
-  margin-top: 4px;
   font-size: 11px;
   color: #67c23a;
   background: #f0f9eb;
   border-radius: 4px;
   padding: 1px 6px;
 }
+.hotel-tag { color: #409eff; background: #ecf5ff; }
+.card-cost { font-size: 12px; color: #e6a23c; font-weight: 600; }
 </style>
