@@ -128,7 +128,7 @@ async def itinerary(state, config) -> dict:
             cx = cy = 0.0
         daily_centers.append({"lng": cx, "lat": cy})
 
-    llm = build_llm(temperature=0).with_structured_output(DayPlans)
+    llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
     payload = {
         "days": days,
         "clusters": clusters,

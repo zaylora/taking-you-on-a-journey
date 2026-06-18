@@ -19,7 +19,7 @@ class NormalizedReq(BaseModel):
 
 
 async def dispatch(state) -> dict:
-    llm = build_llm(temperature=0).with_structured_output(NormalizedReq)
+    llm = build_llm(temperature=0).with_structured_output(NormalizedReq, method="function_calling")
     history = state.get("clarify_history", [])
     answered = "；".join(f"{h['field']}={h.get('answer','')}" for h in history) or "（无）"
     req = await llm.ainvoke([

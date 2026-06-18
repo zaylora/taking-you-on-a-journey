@@ -18,7 +18,7 @@ def build_llm(provider: str | None = None, **overrides) -> BaseChatModel:
             model_provider="openai",
             api_key=s.openai_api_key.get_secret_value() or None,
             base_url=s.openai_base_url,
-            temperature=s.temperature,
+            temperature=overrides.pop("temperature", s.temperature),
             **overrides,
         )
 
@@ -28,7 +28,7 @@ def build_llm(provider: str | None = None, **overrides) -> BaseChatModel:
             model_provider="anthropic",
             api_key=s.anthropic_api_key.get_secret_value() or None,
             base_url=s.anthropic_base_url,
-            temperature=s.temperature,
+            temperature=overrides.pop("temperature", s.temperature),
             **overrides,
         )
 

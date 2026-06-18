@@ -27,23 +27,23 @@ export async function fetchChatStream(
     if (done) break
 
     buffer += decoder.decode(value, { stream: true })
-    const parts = buffer.split('\n\n')
+    const parts = buffer.split(/\r?\n\r?\n/)
     
     // 最后一部分可能是不完整的，保留在缓冲区中
     buffer = parts.pop() || ''
 
     for (const part of parts) {
       if (part.trim() === '') continue
-      const lines = part.split('\n')
+      const lines = part.split(/\r?\n/)
       let event = 'message'
       let dataStr = ''
 
       for (const line of lines) {
         if (line.startsWith(':')) continue // 忽略 SSE 注释/心跳行
-        if (line.startsWith('event: ')) {
-          event = line.slice(7).trim()
-        } else if (line.startsWith('data: ')) {
-          dataStr = line.slice(6)
+        if (line.startsWith('event:')) {
+          event = line.slice(6).trim()
+        } else if (line.startsWith('data:')) {
+          dataStr = line.slice(5).trimStart()
         }
       }
 

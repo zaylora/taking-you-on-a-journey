@@ -29,7 +29,7 @@ class ClarifyGaps(BaseModel):
 
 
 async def _evaluate_gaps(state) -> list[Gap]:
-    llm = build_llm(temperature=0).with_structured_output(ClarifyGaps)
+    llm = build_llm(temperature=0).with_structured_output(ClarifyGaps, method="function_calling")
     history = state.get("clarify_history", [])
     answered = "；".join(f"{h['field']}={h.get('answer','')}" for h in history) or "（无）"
     prompt = [
