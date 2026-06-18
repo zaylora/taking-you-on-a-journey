@@ -1,6 +1,11 @@
-"""transport 节点（占位）。"""
-from app.graph.state import TripState
+"""transport 节点：高德路径规划。无明确起终点则返回空，由 itinerary 降级。"""
+from app.tools import amap
 
 
-def transport(state: TripState) -> dict:
-    return {}  # TODO(M2): 交通检索 Agent（并行检索之一）
+async def transport(state, config) -> dict:
+    city = state.get("city", "")
+    try:
+        route = await amap.plan_route(city, city) if city else {}
+    except Exception:  # noqa: BLE001
+        route = {}
+    return {"transport": route}

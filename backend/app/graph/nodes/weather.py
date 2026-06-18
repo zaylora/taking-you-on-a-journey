@@ -1,6 +1,6 @@
-"""weather 节点（占位）。"""
-from app.graph.state import TripState
+"""weather 节点：调高德天气，失败由 tool 层降级。"""
+from app.tools import amap
 
 
-def weather(state: TripState) -> dict:
-    return {}  # TODO(M2): 天气检索 Agent（并行检索之一）
+async def weather(state, config) -> dict:
+    return {"weather": await amap.get_weather(state.get("city", ""))}
