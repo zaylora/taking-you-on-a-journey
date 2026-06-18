@@ -15,7 +15,7 @@ EVENT_CLARIFY = "clarify"   # data: {"field","question","options"} —— 暂停
 
 # 图节点全集（桥接层据此过滤 on_chain_start/end 名）
 NODES = {"clarify", "dispatch", "weather", "attractions",
-         "restaurants", "transport", "itinerary", "summarize"}
+         "restaurants", "transport", "itinerary", "accommodation", "budget", "summarize"}
 
 # node_start 携带的友好阶段文案（前端进度条展示，不暴露中间 LLM token）
 NODE_LABELS = {
@@ -26,6 +26,8 @@ NODE_LABELS = {
     "restaurants": "正在挑选餐厅…",
     "transport": "正在规划交通…",
     "itinerary": "正在按顺路编排每日行程…",
+    "accommodation": "正在挑选住宿…",
+    "budget": "正在核算预算…",
     "summarize": "正在生成攻略…",
 }
 

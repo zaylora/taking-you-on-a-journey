@@ -19,7 +19,8 @@ def test_event_constants_present():
 
 def test_node_labels_cover_all_nodes():
     assert C.NODES == {"clarify", "dispatch", "weather", "attractions",
-                       "restaurants", "transport", "itinerary", "summarize"}
+                       "restaurants", "transport", "itinerary",
+                       "accommodation", "budget", "summarize"}
     for n in C.NODES:
         assert C.NODE_LABELS.get(n)  # 每个节点都有非空中文文案
 

@@ -36,7 +36,7 @@ class TripState(TypedDict, total=False):
     daily_centers: list
     day_plans: list
 
-    # —— M4 预留（注释占位）——
-    # hotels: list
-    # budget_check: dict
-    # retry_count: int
+    # —— M4：住宿嵌入 day_plans + 预算核算 + 超支回退 ——
+    budget_check: dict          # {limit,estimated,over,retry,breakdown,retry_count,note}
+    retry_count: int            # 已回退次数，budget 节点维护（last-write-wins）
+    budget_advice: dict         # {over_amount, cut_suggestions}；itinerary 回退时读
