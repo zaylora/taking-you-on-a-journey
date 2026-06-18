@@ -1,6 +1,7 @@
 """itinerary 节点：cluster_by_day 聚类分天（纯函数） + LLM 填充 day_plans（Task 8）。"""
 import math
 
+from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.factory import build_llm
@@ -11,42 +12,49 @@ from app.llm.factory import build_llm
 # ---------------------------------------------------------------------------
 
 class Location(BaseModel):
-    lng: float = 0.0
-    lat: float = 0.0
+    lng: float = Field(default=0.0, description="经度，沿用输入坐标，不要自行编造")
+    lat: float = Field(default=0.0, description="纬度，沿用输入坐标，不要自行编造")
 
 
 class DayWeather(BaseModel):
-    text: str = ""
-    temp: str = ""
-    is_rainy: bool = False
+    text: str = Field(default="", description="天气描述，如“晴”“小雨”；沿用输入天气数据")
+    temp: str = Field(default="", description="气温，如“18~26℃”；沿用输入天气数据")
+    is_rainy: bool = Field(default=False, description="当天是否下雨，下雨时应优先安排室内项")
 
 
 class PlanItem(BaseModel):
-    type: str                       # attraction | meal | transport
-    name: str = ""
-    poi_id: str = ""
-    location: Location = Field(default_factory=Location)
-    start: str = ""
-    end: str = ""
-    indoor: bool = False
-    note: str = ""
-    mode: str = ""                  # transport 用
-    from_: str = Field(default="", alias="from")
-    to: str = ""
+    type: str = Field(
+        description="行程项类型，仅限三种：attraction（景点）、meal（餐饮）、transport（交通）"
+    )
+    name: str = Field(default="", description="景点或餐厅名称；transport 项可留空")
+    poi_id: str = Field(default="", description="高德 POI id，沿用输入数据，不要编造")
+    location: Location = Field(default_factory=Location, description="该项经纬度，沿用输入坐标")
+    start: str = Field(default="", description="开始时间，24 小时制 HH:MM，如 09:30")
+    end: str = Field(default="", description="结束时间，24 小时制 HH:MM，如 11:30")
+    indoor: bool = Field(default=False, description="是否室内项；雨天优先安排 indoor=true 的项")
+    note: str = Field(default="", description="补充说明，一句话简述安排理由或注意事项")
+    mode: str = Field(default="", description="交通方式，如“步行”“地铁”“驾车”；仅 transport 项填写")
+    from_: str = Field(default="", alias="from", description="交通出发地名称；仅 transport 项填写")
+    to: str = Field(default="", description="交通目的地名称；仅 transport 项填写")
 
     model_config = {"populate_by_name": True}
 
 
 class DayPlan(BaseModel):
-    day: int
-    date: str = ""
-    weather: DayWeather = Field(default_factory=DayWeather)
-    center: Location = Field(default_factory=Location)
-    items: list[PlanItem] = Field(default_factory=list)
+    day: int = Field(description="第几天，从 1 开始的正整数")
+    date: str = Field(default="", description="当天日期，格式 YYYY-MM-DD；由 start_date 顺延推算")
+    weather: DayWeather = Field(default_factory=DayWeather, description="当天天气，沿用输入天气数据")
+    center: Location = Field(default_factory=Location, description="当天活动的中心坐标")
+    items: list[PlanItem] = Field(
+        default_factory=list,
+        description="当天按时间顺序排列的行程项，含景点、餐饮与必要的市内交通",
+    )
 
 
 class DayPlans(BaseModel):
-    days: list[DayPlan] = Field(default_factory=list)
+    days: list[DayPlan] = Field(
+        default_factory=list, description="逐天的行程安排列表，长度应等于总天数 days"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -138,8 +146,8 @@ async def itinerary(state, config) -> dict:
         "start_date": state.get("start_date", ""),
     }
     result = await llm.ainvoke([
-        {"role": "system", "content": _SYS},
-        {"role": "user", "content": str(payload)},
+        SystemMessage(content=_SYS),
+        HumanMessage(content=str(payload)),
     ], config=config)
     return {
         "daily_centers": daily_centers,

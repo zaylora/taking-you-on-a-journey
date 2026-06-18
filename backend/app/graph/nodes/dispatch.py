@@ -1,6 +1,7 @@
 """dispatch 节点（M2 升级）：把 query + clarify_history 标准化为结构化需求。"""
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.llm.factory import build_llm
 
@@ -11,12 +12,18 @@ _SYS = (
 
 
 class NormalizedReq(BaseModel):
-    city: str = ""
-    start_date: str = ""
-    days: int = 3
-    num_people: int = 1
-    preferences: dict = Field(default_factory=dict)
-    budget: float = 0.0
+    city: str = Field(default="", description="目的地城市名，如“北京”“成都”；无法判断时留空字符串")
+    start_date: str = Field(default="", description="出发日期，格式 YYYY-MM-DD；未指定时留空字符串")
+    days: int = Field(default=3, description="行程天数，正整数；未指定时默认 3")
+    num_people: int = Field(default=1, description="出行人数，正整数；未指定时默认 1")
+    preferences: dict = Field(
+        default_factory=dict,
+        description=(
+            "旅行偏好的键值对，键为偏好维度、值为对应取值，例如 "
+            '{"风格": "美食", "节奏": "轻松", "住宿": "经济型"}；无偏好时返回空对象 {}'
+        ),
+    )
+    budget: float = Field(default=0.0, description="总预算，单位人民币元；未指定时填 0 表示不限")
 
 
 async def dispatch(state, config: RunnableConfig) -> dict:
@@ -24,8 +31,8 @@ async def dispatch(state, config: RunnableConfig) -> dict:
     history = state.get("clarify_history", [])
     answered = "；".join(f"{h['field']}={h.get('answer','')}" for h in history) or "（无）"
     req = await llm.ainvoke([
-        {"role": "system", "content": _SYS},
-        {"role": "user", "content": f"原始需求：{state.get('query','')}\n已澄清：{answered}"},
+        SystemMessage(content=_SYS),
+        HumanMessage(content=f"原始需求：{state.get('query','')}\n已澄清：{answered}"),
     ], config=config)
     data = req.model_dump()
     return {

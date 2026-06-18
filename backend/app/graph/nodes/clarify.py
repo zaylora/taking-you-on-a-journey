@@ -4,6 +4,7 @@
 - 有缺口 → interrupt 抛出 {field,question,options}，resume 后写回 clarify_history。
 ⚠️ interrupt 前的评估在 resume 时会重跑，故 temperature=0 保持确定性。
 """
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
 from pydantic import BaseModel, Field
@@ -26,7 +27,10 @@ class Gap(BaseModel):
 
 
 class ClarifyGaps(BaseModel):
-    gaps: list[Gap] = Field(default_factory=list)
+    gaps: list[Gap] = Field(
+        default_factory=list,
+        description="仍需向用户澄清的缺失要素列表；信息已足够规划时返回空数组",
+    )
 
 
 async def _evaluate_gaps(state, config: RunnableConfig) -> list[Gap]:
@@ -34,8 +38,8 @@ async def _evaluate_gaps(state, config: RunnableConfig) -> list[Gap]:
     history = state.get("clarify_history", [])
     answered = "；".join(f"{h['field']}={h.get('answer','')}" for h in history) or "（无）"
     prompt = [
-        {"role": "system", "content": _SYS},
-        {"role": "user", "content": f"原始需求：{state.get('query','')}\n已澄清：{answered}"},
+        SystemMessage(content=_SYS),
+        HumanMessage(content=f"原始需求：{state.get('query','')}\n已澄清：{answered}"),
     ]
     result = await llm.ainvoke(prompt, config=config)
     return result.gaps
