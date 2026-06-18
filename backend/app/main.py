@@ -48,3 +48,8 @@ app.include_router(map_proxy_router)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
+
+def start_dev():
+    """用于开发环境启动的便捷入口 (由 uv run dev 调用)"""
+    import uvicorn
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
