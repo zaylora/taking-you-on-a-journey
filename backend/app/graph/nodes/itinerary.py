@@ -36,8 +36,17 @@ class PlanItem(BaseModel):
     mode: str = Field(default="", description="交通方式，如“步行”“地铁”“驾车”；仅 transport 项填写")
     from_: str = Field(default="", alias="from", description="交通出发地名称；仅 transport 项填写")
     to: str = Field(default="", description="交通目的地名称；仅 transport 项填写")
+    cost: float = Field(default=0.0, description="该项人均花费(元)：门票/餐标/市内交通；免费景点或交通项填 0")
 
     model_config = {"populate_by_name": True}
+
+
+class Hotel(BaseModel):
+    name: str = Field(default="", description="酒店名称，沿用候选池，不要编造")
+    poi_id: str = Field(default="", description="高德 POI id；降级参考酒店可留空")
+    location: Location = Field(default_factory=Location, description="酒店经纬度")
+    price: float = Field(default=0.0, description="每晚整间价(元)，按住宿档位估")
+    level: str = Field(default="", description="住宿档位：经济/舒适/高端")
 
 
 class DayPlan(BaseModel):
@@ -49,6 +58,7 @@ class DayPlan(BaseModel):
         default_factory=list,
         description="当天按时间顺序排列的行程项，含景点、餐饮与必要的市内交通",
     )
+    hotel: Hotel | None = Field(default=None, description="当晚住宿；离程日/单日游为 None")
 
 
 class DayPlans(BaseModel):
@@ -64,7 +74,11 @@ class DayPlans(BaseModel):
 _SYS = (
     "你是行程编排助手。给定每天的景点簇、餐厅候选、交通与天气，为每天安排合理的时间线："
     "上午/下午景点、午餐/晚餐就近分配餐厅、必要的市内交通。雨天优先室内项。"
-    "输出严格符合给定结构（含每项的 location 经纬度，沿用输入坐标）。"
+    "为每个行程项估算人均花费 cost（元）：门票按景点合理价、餐标按餐厅档位、市内交通按方式估；"
+    "免费景点或无费用项填 0。"
+    "若输入含 budget_advice（上轮超支额与削减建议），据此压低总花费："
+    "优先减少或替换高价付费景点、降低餐标、精简交通。"
+    "输出严格符合给定结构（含每项的 location 经纬度与 cost，沿用输入坐标）。"
 )
 
 
@@ -124,6 +138,23 @@ def _nearest_neighbor_order(seg: list[dict]) -> list[dict]:
 # Async graph node (Task 8)
 # ---------------------------------------------------------------------------
 
+def _build_payload(state: dict, clusters: list) -> dict:
+    """构造传给 LLM 的输入 payload；回退时带上 budget_advice。纯函数，便于单测。"""
+    payload = {
+        "days": state.get("days", 3) or 3,
+        "clusters": clusters,
+        "restaurants": state.get("restaurants", []),
+        "transport": state.get("transport", {}),
+        "weather": state.get("weather", {}),
+        "start_date": state.get("start_date", ""),
+        "num_people": state.get("num_people", 1) or 1,
+    }
+    advice = state.get("budget_advice")
+    if advice:
+        payload["budget_advice"] = advice
+    return payload
+
+
 async def itinerary(state, config) -> dict:
     days = state.get("days", 3) or 3
     clusters = cluster_by_day(state.get("attractions", []) or [], days)
@@ -137,14 +168,7 @@ async def itinerary(state, config) -> dict:
         daily_centers.append({"lng": cx, "lat": cy})
 
     llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
-    payload = {
-        "days": days,
-        "clusters": clusters,
-        "restaurants": state.get("restaurants", []),
-        "transport": state.get("transport", {}),
-        "weather": state.get("weather", {}),
-        "start_date": state.get("start_date", ""),
-    }
+    payload = _build_payload(state, clusters)
     result = await llm.ainvoke([
         SystemMessage(content=_SYS),
         HumanMessage(content=str(payload)),
