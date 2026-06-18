@@ -1,50 +1,50 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
+import type { ClarifyPayload } from '../types'
 
 export interface Message {
   role: 'user' | 'assistant'
   content: string
+  kind?: 'text' | 'clarify'   // clarify 问题气泡区别于普通文本
 }
 
 export const useTripStore = defineStore('trip', () => {
   const messages = ref<Message[]>([])
-  const agentProgress = ref<string[]>([])
-  
-  const addMessage = (role: 'user' | 'assistant', content: string) => {
-    messages.value.push({ role, content })
+  const agentProgress = ref<Record<string, 'running' | 'done'>>({})
+  const nodeLabels = ref<Record<string, string>>({})   // node_start 携带的后端友好文案
+  const threadId = ref<string | null>(null)
+  const dayPlans = ref<any[]>([])
+  const clarifyPending = ref<ClarifyPayload | null>(null)
+
+  const addMessage = (role: 'user' | 'assistant', content: string, kind: 'text' | 'clarify' = 'text') => {
+    messages.value.push({ role, content, kind })
   }
-  
   const appendToLastMessage = (text: string) => {
-    if (messages.value.length === 0 || messages.value[messages.value.length - 1].role !== 'assistant') {
+    const last = messages.value[messages.value.length - 1]
+    if (!last || last.role !== 'assistant' || last.kind === 'clarify') {
       addMessage('assistant', text)
     } else {
-      messages.value[messages.value.length - 1].content += text
+      last.content += text
     }
   }
-
-  const startNode = (node: string) => {
-    if (!agentProgress.value.includes(node)) {
-      agentProgress.value.push(node)
-    }
+  const startNode = (node: string, label?: string) => {
+    agentProgress.value[node] = 'running'
+    if (label) nodeLabels.value[node] = label
   }
+  const endNode = (node: string) => { agentProgress.value[node] = 'done' }
+  const clearProgress = () => { agentProgress.value = {}; nodeLabels.value = {} }
 
-  const endNode = (_node: string) => {
-    // 如果我们想移除节点或将其保留为已完成状态，目前我们先保留它并可能显示为已完成状态
-    // M1 规范提到 "node_start/end 点亮"，因此我们可能只需要追踪活动节点即可。
-    // 让我们暂时只更新活动节点，或已完成节点数组。
+  const setThreadId = (id: string) => { threadId.value = id }
+  const setClarify = (c: ClarifyPayload) => {
+    clarifyPending.value = c
+    addMessage('assistant', c.question, 'clarify')
   }
-
-  const clearProgress = () => {
-    agentProgress.value = []
-  }
+  const clearClarify = () => { clarifyPending.value = null }
+  const setDayPlans = (plans: any[]) => { dayPlans.value = plans }
 
   return {
-    messages,
-    agentProgress,
-    addMessage,
-    appendToLastMessage,
-    startNode,
-    endNode,
-    clearProgress
+    messages, agentProgress, nodeLabels, threadId, dayPlans, clarifyPending,
+    addMessage, appendToLastMessage, startNode, endNode, clearProgress,
+    setThreadId, setClarify, clearClarify, setDayPlans,
   }
 })

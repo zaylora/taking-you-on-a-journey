@@ -1,15 +1,14 @@
 export async function fetchChatStream(
   message: string,
+  threadId: string | null,
   onChunk: (event: string, data: any) => void,
   signal?: AbortSignal
 ) {
   const baseUrl = import.meta.env.VITE_API_BASE || 'http://localhost:8000'
   const response = await fetch(`${baseUrl}/api/chat`, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({ message }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message, thread_id: threadId }),
     signal
   })
 
