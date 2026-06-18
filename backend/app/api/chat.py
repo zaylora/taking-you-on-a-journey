@@ -10,5 +10,4 @@ router = APIRouter()
 
 @router.post("/api/chat")
 async def chat(req: ChatRequest, request: Request):
-    # ping=15：每 15s 发一条 SSE 注释心跳，保活连接（前端按 ':' 开头忽略）
-    return EventSourceResponse(sse_events(req.message, request), ping=15)
+    return EventSourceResponse(sse_events(req.message, req.thread_id, request), ping=15)

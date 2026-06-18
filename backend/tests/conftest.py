@@ -1,10 +1,14 @@
 """复用打桩件：假 LLM（流式 / 结构化）与假高德 tool。所有测试不依赖真实 Key/网络。"""
 import pytest
-from langchain_core.messages import AIMessageChunk
+from langchain_core.language_models.fake_chat_models import GenericFakeChatModel
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 
 class FakeStreamingLLM:
-    """模拟 build_llm() 返回的可流式 ChatModel，仅实现 astream。"""
+    """模拟 build_llm() 返回的可流式 ChatModel，仅实现 astream。
+    注意：此类不继承 BaseChatModel，不会触发 on_chat_model_stream 事件。
+    仅用于单节点测试（test_summarize 等），不用于端到端 SSE 流测试。
+    """
     def __init__(self, tokens):
         self._tokens = list(tokens)
 
@@ -34,11 +38,18 @@ class FakeStructuredLLM:
 
 
 def make_fake_build_llm(*, tokens=None, structured=None):
-    """生成可 monkeypatch 进各节点模块的 build_llm 替身。"""
+    """生成可 monkeypatch 进各节点模块的 build_llm 替身。
+
+    - structured 参数：返回 FakeStructuredLLM（with_structured_output 用于 dispatch/itinerary）
+    - tokens 参数：返回 GenericFakeChatModel（真正的 BaseChatModel，
+      在 astream_events(v2) 中会触发 on_chat_model_stream 事件，供 summarize 节点使用）
+    """
     def _factory(*_a, **_k):
         if structured is not None:
             return FakeStructuredLLM(structured)
-        return FakeStreamingLLM(tokens or ["占位"])
+        # GenericFakeChatModel 每次消费一条消息，必须在 _factory 内重新创建
+        text = "".join(tokens or ["占位"])
+        return GenericFakeChatModel(messages=iter([AIMessage(content=text)]))
     return _factory
 
 
