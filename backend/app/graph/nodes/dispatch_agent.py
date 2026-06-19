@@ -168,4 +168,5 @@ def reset_for_plan_new(state: dict) -> dict:
         "budget_check": {},
         "daily_centers": [],
         "changed_days": [],
+        "refine_request": {},
     }

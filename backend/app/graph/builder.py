@@ -1,4 +1,4 @@
-"""图构建：clarify → dispatch → retrieval → itinerary → accommodation → budget → summarize."""
+"""图构建：memory → dispatch_agent →（clarify→retrieve→检索）/refine/answer → 按需重排 → summarize → memory_update。"""
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.memory import MemorySaver
 

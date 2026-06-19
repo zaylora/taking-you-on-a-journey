@@ -3,7 +3,8 @@
 本身不做事（pass-through），仅作为「clarify → 4 个检索子 Agent 并行」的单一上游，
 让 LangGraph 从这里 fan-out 到 weather/attractions/restaurants/transport。
 """
+from langchain_core.runnables import RunnableConfig
 
 
-async def retrieve(state, config) -> dict:
+async def retrieve(state: dict, config: RunnableConfig) -> dict:
     return {}

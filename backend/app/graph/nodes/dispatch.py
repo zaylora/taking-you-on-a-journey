@@ -1,4 +1,5 @@
-"""dispatch 节点：把当前消息 + 澄清 + 历史偏好标准化为结构化需求。"""
+"""dispatch 节点：把当前消息 + 澄清 + 历史偏好标准化为结构化需求。
+（M5 fix 后 dispatch 函数已退役、不再进图；本模块仅为 dispatch_agent 提供 NormalizedReq 与 _SYS。）"""
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, SystemMessage
