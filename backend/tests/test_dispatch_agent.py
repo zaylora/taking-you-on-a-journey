@@ -32,7 +32,7 @@ def test_parse_refine_extracts_op_day_and_flags():
 def test_route_after_dispatch_maps_intent():
     assert route_after_dispatch({"last_intent": "plan_new"}) == "plan_new"
     assert route_after_dispatch({"last_intent": "refine_existing"}) == "refine"
-    assert route_after_dispatch({"last_intent": "qa"}) == "qa"
+    assert route_after_dispatch({"last_intent": "qa"}) == "answer"
     assert route_after_dispatch({}) == "plan_new"
 
 

@@ -155,7 +155,7 @@ def route_after_dispatch(state: dict) -> str:
     if intent_name == "refine_existing":
         return "refine"
     if intent_name == "qa":
-        return "qa"
+        return "answer"
     return "plan_new"
 
 
