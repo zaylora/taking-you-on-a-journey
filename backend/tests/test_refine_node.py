@@ -43,6 +43,7 @@ async def test_reorder_changes_only_order():
     out = await refine(state)
     assert out["changed_days"] == [1]
     assert [i["name"] for i in out["day_plans"][0]["items"]] == ["陈麻婆", "武侯祠"]
+    assert out["day_plans"][1]["items"] == _plan()[1]["items"]
 
 
 @pytest.mark.asyncio

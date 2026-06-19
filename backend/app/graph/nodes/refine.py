@@ -131,7 +131,7 @@ async def refine(state, config=None) -> dict:
         changed_days = [target_day]
     elif op == "change_budget":
         new_budget = constraints.get("budget")
-        if new_budget:
+        if new_budget is not None:
             extra["budget"] = float(new_budget)
     elif op == "change_hotel":
         changed_days = _overnight_days(day_plans)  # items 不动，accommodation 重排 hotel
@@ -142,7 +142,8 @@ async def refine(state, config=None) -> dict:
     return {
         **extra,
         "day_plans": day_plans,
-        "refine_request": {**request, "op": op, "target_day": target_day},
+        "refine_request": {**request, "op": op, "target_day": target_day,
+                           "needs_budget_recheck": request.get("needs_budget_recheck", True)},
         "changed_days": changed_days,
         "plan_version": plan_version,
     }
