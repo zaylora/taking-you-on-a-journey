@@ -34,3 +34,5 @@ def test_clarify_then_resume_to_final(client, fake_amap, monkeypatch):
     second = client.post("/api/chat", json={"message": "成都", "thread_id": tid}).text
     assert "event: final" in second
     assert "武侯祠" in second
+    assert '"node": "memory"' not in second
+    assert '"node": "intent"' not in second

@@ -6,14 +6,19 @@
 """
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.core.config import get_settings
 from app.api.chat import router as chat_router
+from app.api.sessions import router as sessions_router
 from app.api.plan import router as plan_router
 from app.api.map_proxy import router as map_proxy_router
+from app.graph.builder import build_graph
+from app.services.session_store import SessionStore
 
 
 @asynccontextmanager
@@ -34,7 +39,17 @@ async def lifespan(app: FastAPI):
         os.environ["LANGCHAIN_PROJECT"] = settings.langchain_project
         os.environ["LANGCHAIN_ENDPOINT"] = settings.langchain_endpoint
 
-    yield
+    db_path = Path(settings.checkpoint_db_path)
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    session_store = SessionStore(str(db_path))
+    await session_store.setup()
+
+    async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
+        await checkpointer.setup()
+        app.state.checkpointer = checkpointer
+        app.state.graph = build_graph(checkpointer=checkpointer)
+        app.state.session_store = session_store
+        yield
 
 
 app = FastAPI(title="Trip Planner Backend (M2)", lifespan=lifespan)
@@ -50,6 +65,7 @@ app.add_middleware(
 
 # 真实路由 + 占位路由（占位 router 暂无 endpoint，不影响 M1 验收路径）
 app.include_router(chat_router)
+app.include_router(sessions_router)
 app.include_router(plan_router)
 app.include_router(map_proxy_router)
 

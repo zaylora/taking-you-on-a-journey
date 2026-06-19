@@ -2,7 +2,7 @@
   <div class="agent-progress">
     <transition-group name="slide-fade" tag="div" class="progress-bar">
       <div
-        v-for="[node, status] in activeEntries"
+        v-for="[node] in activeEntries"
         :key="node"
         class="node-pill"
       >

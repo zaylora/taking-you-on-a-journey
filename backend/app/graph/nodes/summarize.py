@@ -1,7 +1,6 @@
 """summarize 节点（M2 升级）：按 day_plans 渲染逐日简体中文攻略，逐字流式。
 ⚠️ 必须 async + 接收 config + astream(..., config=config)，token 方能冒泡（M1 实测结论）。
 """
-from langchain_core.messages import AIMessage
 from langchain_core.runnables import RunnableConfig
 
 from app.llm.factory import build_llm
@@ -23,4 +22,4 @@ async def summarize(state: dict, config: RunnableConfig) -> dict:
         if chunk.content:
             parts.append(chunk.content)
     text = "".join(parts)
-    return {"messages": [AIMessage(content=text)], "summary": text}
+    return {"summary": text}

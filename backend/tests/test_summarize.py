@@ -11,4 +11,4 @@ async def test_summarize_streams_from_day_plans(monkeypatch):
              "query": "成都3天"}
     out = await s_mod.summarize(state, None)
     assert out["summary"] == "第一天：武侯祠"
-    assert out["messages"][0].content == "第一天：武侯祠"
+    assert "messages" not in out
