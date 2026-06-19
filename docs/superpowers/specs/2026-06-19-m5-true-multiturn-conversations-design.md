@@ -203,26 +203,33 @@ if estimated_tokens(old) > SUMMARY_TRIGGER_TOKENS
 
 ### 3.4 新增节点
 
-M5 在现有 M4 图前部新增 `memory` 与 `intent`，并新增 `refine` / `answer` 分支。澄清恢复（`Command(resume)`）由 API 层在进图前拦截，直接从 interrupt 暂停点（clarify）恢复，**不经过 memory / intent**，因此 intent 不含 `clarify_answer` 这一类。
+M5 fix 实际落地拓扑（intent + dispatch 物理合并为 dispatch_agent）：澄清恢复（`Command(resume)`）由 API 层在进图前拦截，直接从 interrupt 暂停点（clarify）恢复，**不经过 memory / dispatch_agent**。
 
 ```text
-（pending interrupt 时：API 层直接 Command(resume=message)，从 clarify 暂停点恢复，跳过下面整段）
+（pending interrupt 时：API 层直接 Command(resume=message) 从 clarify 暂停点恢复，跳过 memory / dispatch_agent）
 
-START
-  → memory
-  → intent
-  ├─ plan_new        → clarify → dispatch → 并行检索 → itinerary → accommodation → budget → summarize → memory_update → END
-  ├─ refine_existing → refine（在旧 day_plans 上局部编辑）→ [需新 POI? → 检索] → [改酒店? → accommodation] → [动预算? → budget] → summarize → memory_update → END
-  └─ qa              → answer → memory_update → END
+START → memory → dispatch_agent
+  ├─ plan_new → reset_plan_new → clarify ⟲ → retrieve → 并行检索(天气/景点/餐饮/交通)
+  │             → itinerary → ◇酒店需重排? ─是→ accommodation ─┐
+  │                                          └否─────────────────┤→ ◇预算需重算? ─是→ budget ─┐
+  │                                                              └否────────────────────────────┤→ summarize
+  │             （budget 超支且 plan_new → 回 itinerary 重排）                                    │
+  ├─ refine_existing → refine（旧 day_plans 局部重排 + 按 op 选择性补检索）→ 同上「酒店需重排?/预算需重算?」两判断 → summarize
+  └─ qa → answer
+  → memory_update → END
 ```
+
+两个判断为**规则路由**（`route_after_plan` / `route_after_accommodation`），依据 `last_intent` + `refine_request.op`，不额外调用 LLM；op→标志映射见实现计划 Global Constraints 表。
 
 节点职责：
 
 | 节点 | 职责 |
 |---|---|
 | `memory` | 读取 state 中历史消息、摘要、上轮行程；构建本轮上下文窗口 |
-| `intent` | 判断用户是在新规划、修改旧方案、问答、还是回答澄清问题 |
-| `refine` | 把用户修改请求结构化，并**直接在旧 `day_plans` 上**局部编辑；仅在需要新 POI 时回调检索节点，**不走 itinerary 全量重排** |
+| `dispatch_agent` | 判断意图（plan_new / refine_existing / qa）并解析结构化需求；物理合并原 intent + dispatch 两节点 |
+| `reset_plan_new` | plan_new 路径专用：清除上轮脏状态（clarified/clarify_round/retry_count/day_plans/budget_check 等），保留 messages/conversation_summary |
+| `retrieve` | plan_new 路径的检索锚点，触发 4 个并行检索节点（天气/景点/餐饮/交通） |
+| `refine` | 把用户修改请求结构化，并**直接在旧 `day_plans` 上**局部编辑；仅在需要新 POI 时回调对应检索节点，**不走 itinerary 全量重排** |
 | `answer` | 不改变行程，只基于历史和当前方案回答用户问题 |
 | `memory_update` | 把本轮用户消息、AI 回复、关键行程变化写回 `messages` 和摘要 |
 
@@ -294,7 +301,7 @@ class IntentResult(BaseModel):
 
 `itinerary` **仅服务 plan_new 全量编排**，保持现状（`cluster_by_day` 聚类 + LLM 编排），不接收 `refine_request`。
 
-> 注意：`itinerary` 天然是"从检索结果重建"，把它复用到局部修改会退化成全量重排，违背"只改受影响的天"，也会让 `test_multiturn_refine` 的 `changed_days=[2]` 断言挂掉。局部修改的逻辑全部放在 `refine` 节点（见 3.7），refine 路径不回到 itinerary。
+> 注意：`itinerary` 天然是"从检索结果重建"，把它复用到局部修改会退化成全量重排，违背"只改受影响的天"，也会让 `test_multiturn_refine` 的 `changed_days=[2]` 断言挂掉。局部修改的逻辑全部放在 `refine` 节点（见 3.7），**refine 路径不回到 itinerary**。
 
 `summarize` 输入加入本轮类型：
 
@@ -320,13 +327,14 @@ class RefineRequest(BaseModel):
     needs_budget_recheck: bool = True
 ```
 
-执行策略（所有分支都在旧 `day_plans` 上增量改，**绝不回到 itinerary 全量重排**）：
+执行策略（**refine 局部重排在 refine 节点内完成，只改受影响天**；其后接 `route_after_plan` 两段按需判断：`change_hotel` 才走 accommodation、`needs_budget_recheck` 才走 budget、`reorder` 直达 summarize；**绝不回到 itinerary 全量重排**）：
 
-- `remove` / `relax` / `reorder`：纯算法 + 轻量 LLM 在旧 `day_plans` 上删减 / 调整顺序，不调检索。
-- `replace` / `add`：需要新 POI 时调用对应检索节点补候选，再局部插入 / 替换受影响的项。
-- `change_budget`：更新预算上限后进入 `budget` 节点核算；若超支，用 `budget_advice` 在 refine 内对受影响项局部压成本（删 / 降档），而不是触发 plan_new 的 itinerary 回退循环。
-- `change_hotel`：重跑 `accommodation`，再预算核算。
-- 影响范围不明确时，先走 `clarify`，问“你想调整第几天？”
+- `remove` / `relax` / `reorder`：纯算法 + 轻量 LLM 在旧 `day_plans` 上删减 / 调整顺序，不调检索；直接通过 `route_after_plan` 跳到 summarize。
+- `replace` / `add`：需要新 POI 时调用对应检索节点（`attractions` / `restaurants`）补候选，再局部插入 / 替换受影响的项；`needs_budget_recheck=True` 时经 `route_after_plan` 走 budget。
+- `change_meal`：触发 `restaurants` 检索补候选后局部替换餐饮项；其后经 `route_after_plan` 按需走 budget。
+- `change_budget`：更新预算上限后经 `route_after_plan` 进入 `budget` 节点核算；若超支，用 `budget_advice` 在 refine 内对受影响项局部压成本（删 / 降档），而不是触发 plan_new 的 itinerary 回退循环。
+- `change_hotel`：`change_hotel` 标志使 `route_after_plan` 路由到 `accommodation` 重排，再经 `route_after_accommodation` 按需走 budget。
+- 影响范围不明确时，先走 `clarify`，问”你想调整第几天？”
 
 ### 3.8 API 设计
 

@@ -237,3 +237,19 @@ uv run pytest        # 对 LLM 工厂打桩，不依赖真实 Key/网络
   - `clarify` 节点在无缺口时直接放行（退化为 M1 式单轮），有缺口时通过 `interrupt` 暂停，前端接 `clarify` 事件渲染问题 + 选项。
   - 中间节点（dispatch/weather/... 等）产生的 LLM token 不暴露给前端；仅 summarize 节点的 token 逐字流出。
   - 单个并行检索节点失败（如高德超时）走降级策略（返回空或季节气候），不阻断其余节点与后续编排。
+
+## M5 fix 验收清单
+
+把 M5 编排重构为「单一 dispatch_agent 前置派发 + refine 局部重排 + 住宿/预算按需重排」。
+
+- 拓扑：`START → memory → dispatch_agent ─{plan_new→reset→clarify⟲→retrieve→并行检索→itinerary, refine→refine, qa→answer}`；`itinerary`/`refine → route_after_plan{accommodation,budget,summarize}`；`accommodation → route_after_accommodation{budget,summarize}`；`budget → route_after_budget{itinerary(仅plan_new超支),summarize}`。
+- 判断为规则路由（不调 LLM）：`route_after_plan`/`route_after_accommodation` 读 `last_intent` + `refine_request.op`。
+- refine 局部重排（async，只改 target_day）：relax/remove/reorder 本地改；change_meal→`restaurants` 检索、add/replace→`attractions` 检索后局部插入；change_budget 改预算上限走 budget；change_hotel 交 accommodation 重排。
+
+### 测试（M5 fix）
+
+```bash
+cd backend && uv run pytest -q
+```
+
+关键覆盖：`test_dispatch_agent`（合并判意图+解析）、`test_dispatch_topology`（前半拓扑）、`test_need_routing`（两按需路由）、`test_refine_node`（本地 op）、`test_refine_search`（补检索）、`test_m5fix_e2e`（端到端按 op 选择性重排/跳过）。
