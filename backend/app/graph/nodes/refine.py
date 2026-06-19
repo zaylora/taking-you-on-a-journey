@@ -150,5 +150,22 @@ async def refine(state, config=None) -> dict:
 
 
 async def _apply_search_op(state, day_plans, idx, op, constraints) -> list:
-    """Task 5 实现：补检索后局部插入/替换。Task 4 先占位（不改 items）。"""
-    return []
+    """补检索后局部插入/替换受影响天。失败/空 → 降级不改，返回 []。"""
+    city = state.get("city", "")
+    keywords = (constraints or {}).get("keywords")
+    target_day = day_plans[idx].get("day")
+    try:
+        if op == "change_meal":
+            pois = await amap.search_poi(city, keywords or "美食", "餐饮")
+            if not pois:
+                return []
+            day_plans[idx] = _set_meal(day_plans[idx], _poi_to_item(pois[0], "meal"))
+        else:  # add / replace 景点
+            pois = await amap.search_poi(city, keywords or "热门景点", "风景名胜")
+            if not pois:
+                return []
+            item = _poi_to_item(pois[0], "attraction")
+            day_plans[idx] = _add_or_replace_attraction(day_plans[idx], item, replace=(op == "replace"))
+    except Exception:  # noqa: BLE001 —— 检索失败降级，不阻断本轮
+        return []
+    return [target_day]
