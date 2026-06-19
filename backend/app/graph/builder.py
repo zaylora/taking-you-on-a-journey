@@ -14,6 +14,7 @@ from app.graph.nodes.transport import transport
 from app.graph.nodes.itinerary import itinerary
 from app.graph.nodes.accommodation import accommodation
 from app.graph.nodes.budget import budget, route_after_budget
+from app.graph.nodes.routing import route_after_plan, route_after_accommodation
 from app.graph.nodes.summarize import summarize
 from app.graph.nodes.refine import refine
 from app.graph.nodes.answer import answer
@@ -47,11 +48,14 @@ def build_graph(checkpointer=None):
     for n in ("weather", "attractions", "restaurants", "transport"):
         g.add_edge("retrieve", n)
         g.add_edge(n, "itinerary")
-    g.add_edge("itinerary", "accommodation")
-    g.add_edge("accommodation", "budget")
+    g.add_conditional_edges("itinerary", route_after_plan,
+                            {"accommodation": "accommodation", "budget": "budget", "summarize": "summarize"})
+    g.add_conditional_edges("refine", route_after_plan,
+                            {"accommodation": "accommodation", "budget": "budget", "summarize": "summarize"})
+    g.add_conditional_edges("accommodation", route_after_accommodation,
+                            {"budget": "budget", "summarize": "summarize"})
     g.add_conditional_edges("budget", route_after_budget,
                             {"itinerary": "itinerary", "summarize": "summarize"})
-    g.add_edge("refine", "budget")
     g.add_edge("answer", "memory_update")
     g.add_edge("summarize", "memory_update")
     g.add_edge("memory_update", END)
