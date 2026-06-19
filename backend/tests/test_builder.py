@@ -9,7 +9,7 @@ def test_graph_compiles_with_checkpointer():
 def test_graph_has_all_core_nodes():
     g = build_graph()
     nodes = set(g.get_graph().nodes.keys())
-    for n in ("clarify", "dispatch", "weather", "attractions",
+    for n in ("clarify", "dispatch_agent", "retrieve", "weather", "attractions",
               "restaurants", "transport", "itinerary", "summarize"):
         assert n in nodes
 

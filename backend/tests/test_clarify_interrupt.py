@@ -5,7 +5,7 @@ import re
 
 def _stub_except_clarify(monkeypatch):
     """保留真实 clarify（触发 interrupt）：_evaluate_gaps 按 clarify_history 变化；其余节点打桩。"""
-    from app.graph.nodes import clarify as c, dispatch as d, itinerary as it, summarize as s
+    from app.graph.nodes import clarify as c, dispatch_agent as d, itinerary as it, summarize as s
     from app.graph.nodes.clarify import Gap
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
@@ -35,4 +35,4 @@ def test_clarify_then_resume_to_final(client, fake_amap, monkeypatch):
     assert "event: final" in second
     assert "武侯祠" in second
     assert '"node": "memory"' not in second
-    assert '"node": "intent"' not in second
+    assert '"node": "dispatch_agent"' not in second

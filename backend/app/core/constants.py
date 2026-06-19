@@ -17,7 +17,7 @@ EVENT_INTENT = "intent"     # data: {"intent"} —— M5 意图调试/进度
 EVENT_PLAN_PATCH = "plan_patch"  # data: {"plan_version","changed_days"} —— 局部更新提示
 
 # 图节点全集（桥接层据此过滤 on_chain_start/end 名）
-NODES = {"memory", "intent", "clarify", "dispatch", "weather", "attractions",
+NODES = {"memory", "dispatch_agent", "clarify", "retrieve", "weather", "attractions",
          "restaurants", "transport", "itinerary", "refine", "answer",
          "accommodation", "budget", "summarize", "memory_update"}
 
@@ -25,8 +25,8 @@ NODES = {"memory", "intent", "clarify", "dispatch", "weather", "attractions",
 NODE_LABELS = {
     "clarify": "正在理解你的需求…",
     "memory": "正在读取会话上下文…",
-    "intent": "正在判断本轮意图…",
-    "dispatch": "正在梳理需求要点…",
+    "dispatch_agent": "正在判断任务并分发…",
+    "retrieve": "正在并行检索…",
     "weather": "正在查询目的地天气…",
     "attractions": "正在检索热门景点…",
     "restaurants": "正在挑选餐厅…",

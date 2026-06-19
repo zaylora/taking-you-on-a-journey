@@ -21,7 +21,7 @@ def test_event_constants_present():
 
 
 def test_node_labels_cover_all_nodes():
-    assert C.NODES == {"memory", "intent", "clarify", "dispatch", "weather", "attractions",
+    assert C.NODES == {"memory", "dispatch_agent", "clarify", "retrieve", "weather", "attractions",
                        "restaurants", "transport", "itinerary", "refine", "answer",
                        "accommodation", "budget", "summarize", "memory_update"}
     for n in C.NODES:

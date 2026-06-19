@@ -5,7 +5,7 @@ from app.graph.builder import build_graph
 
 
 async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
-    from app.graph.nodes import clarify as c, dispatch as d, itinerary as it, summarize as s
+    from app.graph.nodes import clarify as c, dispatch_agent as d, itinerary as it, summarize as s
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
     from tests.conftest import make_fake_build_llm

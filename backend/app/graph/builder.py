@@ -4,9 +4,9 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from app.graph.state import TripState
 from app.graph.nodes.memory import memory
-from app.graph.nodes.intent import intent, reset_for_plan_new, route_after_intent
+from app.graph.nodes.dispatch_agent import dispatch_agent, reset_for_plan_new, route_after_dispatch
 from app.graph.nodes.clarify import clarify, route_after_clarify
-from app.graph.nodes.dispatch import dispatch
+from app.graph.nodes.retrieve import retrieve
 from app.graph.nodes.weather import weather
 from app.graph.nodes.attractions import attractions
 from app.graph.nodes.restaurants import restaurants
@@ -27,8 +27,8 @@ def reset_plan_new(state):
 def build_graph(checkpointer=None):
     g = StateGraph(TripState)
     for name, fn in [
-        ("memory", memory), ("intent", intent), ("reset_plan_new", reset_plan_new),
-        ("clarify", clarify), ("dispatch", dispatch),
+        ("memory", memory), ("dispatch_agent", dispatch_agent), ("reset_plan_new", reset_plan_new),
+        ("clarify", clarify), ("retrieve", retrieve),
         ("weather", weather), ("attractions", attractions),
         ("restaurants", restaurants), ("transport", transport),
         ("itinerary", itinerary), ("accommodation", accommodation),
@@ -38,14 +38,14 @@ def build_graph(checkpointer=None):
         g.add_node(name, fn)
 
     g.add_edge(START, "memory")
-    g.add_edge("memory", "intent")
-    g.add_conditional_edges("intent", route_after_intent,
+    g.add_edge("memory", "dispatch_agent")
+    g.add_conditional_edges("dispatch_agent", route_after_dispatch,
                             {"plan_new": "reset_plan_new", "refine": "refine", "answer": "answer"})
     g.add_edge("reset_plan_new", "clarify")
     g.add_conditional_edges("clarify", route_after_clarify,
-                            {"clarify": "clarify", "dispatch": "dispatch"})
+                            {"clarify": "clarify", "retrieve": "retrieve"})
     for n in ("weather", "attractions", "restaurants", "transport"):
-        g.add_edge("dispatch", n)
+        g.add_edge("retrieve", n)
         g.add_edge(n, "itinerary")
     g.add_edge("itinerary", "accommodation")
     g.add_edge("accommodation", "budget")

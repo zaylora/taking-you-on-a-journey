@@ -10,7 +10,7 @@ def _extract(body: str, event: str) -> dict:
 
 
 def _stub_initial_plan(monkeypatch):
-    from app.graph.nodes import accommodation as acc, clarify as c, dispatch as d, itinerary as it, summarize as s
+    from app.graph.nodes import accommodation as acc, clarify as c, dispatch_agent as d, itinerary as it, summarize as s
     from app.graph.nodes.accommodation import _AccoResult
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
