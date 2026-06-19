@@ -19,11 +19,29 @@ import { useTripStore } from '../stores/trip'
 
 const tripStore = useTripStore()
 
+const LABELS: Record<string, string> = {
+  clarify: '正在理解你的需求…',
+  memory: '正在读取会话上下文…',
+  dispatch_agent: '正在判断任务并分发…',
+  retrieve: '正在并行检索…',
+  weather: '正在查询目的地天气…',
+  attractions: '正在检索热门景点…',
+  restaurants: '正在挑选餐厅…',
+  transport: '正在规划交通…',
+  itinerary: '正在按顺路编排每日行程…',
+  refine: '正在局部调整行程…',
+  answer: '正在基于当前方案回答…',
+  accommodation: '正在挑选住宿…',
+  budget: '正在核算预算…',
+  summarize: '正在生成攻略…',
+  memory_update: '正在保存会话记忆…',
+}
+
 const activeEntries = computed(() => {
   return Object.entries(tripStore.agentProgress).filter(([_, status]) => status !== 'done')
 })
 
-const labelOf = (n: string) => tripStore.nodeLabels[n] || n
+const labelOf = (n: string) => tripStore.nodeLabels[n] || LABELS[n] || n
 
 </script>
 
