@@ -54,10 +54,10 @@ def test_change_meal_only_target_day_and_runs_budget(client, fake_amap, monkeypa
 def test_reorder_skips_accommodation_and_budget(client, fake_amap, monkeypatch):
     tid = _new_plan(client, monkeypatch)
 
-    async def boom(*_a, **_k):
-        raise AssertionError("reorder 不应触发检索")
-    import app.tools.amap as amap
-    monkeypatch.setattr(amap, "search_poi", boom)   # accommodation 若被调用会经 search_poi → 炸
+    import app.graph.nodes.accommodation as acc_node
+    def boom_build_llm(*_a, **_k):
+        raise AssertionError("reorder 不应触发 accommodation 节点")
+    monkeypatch.setattr(acc_node, "build_llm", boom_build_llm)
 
     body = client.post("/api/chat",
                        json={"message": "第一天顺序调整一下", "thread_id": tid}).text
