@@ -58,10 +58,10 @@ def test_change_meal_only_target_day_and_runs_budget(client, fake_amap, monkeypa
     assert patch["changed_days"] == [1]
     meals = [i["name"] for i in final["day_plans"][0]["items"] if i["type"] == "meal"]
     assert meals == ["蜀大侠火锅"]
-    # 第二天不动：新节点下第2天 items 由算法产生（杜甫草堂），change_meal 只改第1天
+    # 第二天不动：新节点下第2天 items 由算法产生，cluster_by_day(2,2) → day2 只含杜甫草堂
     second_day_attraction_names = [i["name"] for i in final["day_plans"][1]["items"]
                                    if i["type"] == "attraction"]
-    assert "杜甫草堂" in second_day_attraction_names
+    assert second_day_attraction_names == ["杜甫草堂"]
 
 
 def test_reorder_skips_accommodation_and_budget(client, fake_amap, monkeypatch):

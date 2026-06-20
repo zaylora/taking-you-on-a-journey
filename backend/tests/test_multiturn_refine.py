@@ -48,11 +48,14 @@ def test_second_turn_relaxes_only_target_day(client, fake_amap, monkeypatch):
     first = client.post("/api/chat", json={"message": "成都2天2人预算4000"}).text
     thread_id = _extract(first, "session")["thread_id"]
     initial = _extract(first, "final")
-    # 新节点：每天 items = 景点 + 交通段 + 餐厅（由算法决定），不再是 LLM 提供的景点数
-    # 核心断言：两天都有 items，且第1天比第2天少（1 vs 2 景点 cluster）
+    # 新节点：景点来自算法 cluster_by_day(3景点, 2天) → divmod(3,2)=(1,1)
+    # 前 1 天多 1 个 → day1 得 2 个景点，day2 得 1 个景点
     assert len(initial["day_plans"]) == 2
-    assert len(initial["day_plans"][0]["items"]) > 0
-    assert len(initial["day_plans"][1]["items"]) > 0
+    attraction_counts = [
+        sum(1 for it in day["items"] if it["type"] == "attraction")
+        for day in initial["day_plans"]
+    ]
+    assert attraction_counts == [2, 1]
 
     second = client.post(
         "/api/chat",
