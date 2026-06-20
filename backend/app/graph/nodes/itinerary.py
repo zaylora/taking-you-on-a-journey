@@ -156,6 +156,36 @@ def build_day_stops(attractions_ordered: list[dict], rest_pool: list[dict]) -> l
     return stops
 
 
+def default_cost_by_mode(mode: str, km: float) -> float:
+    """交通段人均粗估(元)：步行 0 / 公交 3 / 驾车 起步+里程。不进 LLM，保证 budget 汇总稳定。"""
+    if mode == "步行":
+        return 0.0
+    if mode == "公交":
+        return 3.0
+    return round(2.0 + 2.0 * km, 1)
+
+
+def _transport_item(p: dict, q: dict) -> dict:
+    lp, lq = p["location"], q["location"]
+    km = haversine_km(lp, lq)
+    mode = mode_by_distance(km)
+    return {"type": "transport", "name": "",
+            "from": p.get("name", ""), "to": q.get("name", ""),
+            "location": {"lng": lp["lng"], "lat": lp["lat"]},
+            "mode": mode, "cost": default_cost_by_mode(mode, km)}
+
+
+def insert_transport(stops: list[dict]) -> list[dict]:
+    """在每对相邻停靠点间插一个交通段（起讫坐标沿用相邻点，mode 按直线距离）。"""
+    if len(stops) < 2:
+        return list(stops)
+    out = [stops[0]]
+    for prev, cur in zip(stops, stops[1:]):
+        out.append(_transport_item(prev, cur))
+        out.append(cur)
+    return out
+
+
 def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:
     """手写贪心：按到城市中心的方位角排序 → 均衡切 days 段 → 段内最近邻顺路。
     纯函数、零依赖。接口固定，未来可替换为 KMeans 而不动调用方。

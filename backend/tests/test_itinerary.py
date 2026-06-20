@@ -110,3 +110,34 @@ def test_build_day_stops_single_attraction_only_dinner():
 def test_build_day_stops_empty_attractions():
     from app.graph.nodes.itinerary import build_day_stops
     assert build_day_stops([], [{"name": "饭", "poi_id": "R", "lng": 1, "lat": 1}]) == []
+
+
+# ---------------------------------------------------------------------------
+# Task 5 — insert_transport + default_cost_by_mode
+# ---------------------------------------------------------------------------
+
+def test_default_cost_by_mode():
+    from app.graph.nodes.itinerary import default_cost_by_mode
+    assert default_cost_by_mode("步行", 0.5) == 0.0
+    assert default_cost_by_mode("公交", 3.0) == 3.0
+    assert default_cost_by_mode("驾车", 10.0) > default_cost_by_mode("驾车", 1.0)
+
+
+def test_insert_transport_links_every_adjacent_pair():
+    from app.graph.nodes.itinerary import insert_transport
+    stops = [
+        {"type": "attraction", "name": "越秀公园", "poi_id": "A1",
+         "location": {"lng": 113.2656, "lat": 23.1401}},
+        {"type": "attraction", "name": "广州塔", "poi_id": "A2",
+         "location": {"lng": 113.3245, "lat": 23.1064}},
+        {"type": "meal", "name": "饭", "poi_id": "R1",
+         "location": {"lng": 113.325, "lat": 23.107}},
+    ]
+    out = insert_transport(stops)
+    assert [it["type"] for it in out] == ["attraction", "transport", "attraction", "transport", "meal"]
+    seg = out[1]
+    assert seg["from"] == "越秀公园" and seg["to"] == "广州塔"
+    assert seg["location"] == {"lng": 113.2656, "lat": 23.1401}  # 起点坐标=前点
+    assert seg["mode"] == "驾车"   # ~7km
+    assert out[3]["mode"] == "步行"  # 广州塔→饭 很近
+    assert insert_transport(stops[:1]) == stops[:1]  # 单点不插段
