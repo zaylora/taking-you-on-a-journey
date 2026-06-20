@@ -175,6 +175,16 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     markerClickCb = cb
   }
 
+  // 选中态下只显示相关点：poiIds=null 时恢复全部显示（总览/按天），
+  // 否则只显示给定 poi_id 的标记（单点=1个，单段路线=起讫2个），其余隐藏。
+  const setVisibleMarkers = (poiIds: string[] | null): void => {
+    if (!map) return
+    for (const [poiId, { marker }] of markerMap.entries()) {
+      if (poiIds === null || poiIds.includes(poiId)) marker.show()
+      else marker.hide()
+    }
+  }
+
   let overviewRouteInstances: any[] = []
   // 总览路线绘制代次：每次清除/重绘 +1。在途的异步 search 回调返回时若发现代次已变，
   // 说明本次绘制已被取代，需把自己刚渲染的路线清掉——否则会留下清不掉的孤儿路线。
@@ -341,5 +351,5 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     ready.value = false
   }
 
-  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, destroy, drawRoute, clearRoute, fetchRouteInfo, drawOverviewRoute, clearOverviewRoute }
+  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, setVisibleMarkers, destroy, drawRoute, clearRoute, fetchRouteInfo, drawOverviewRoute, clearOverviewRoute }
 }

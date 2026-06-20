@@ -28,6 +28,7 @@ onMounted(async () => {
   if (amap.ready.value && tripStore.dayPlans.length > 0) {
     amap.renderDayPlans(tripStore.dayPlans, tripStore.activeDay)
     updateOverviewRoute()
+    updateMarkerVisibility()
   }
 })
 
@@ -68,6 +69,7 @@ watch(mapSignature, () => {
   if (amap.ready.value) {
     amap.renderDayPlans(tripStore.dayPlans, tripStore.activeDay)
     updateOverviewRoute()
+    updateMarkerVisibility()
   }
 })
 
@@ -78,6 +80,7 @@ watch(
     if (amap.ready.value) {
       amap.focusPoi(id)
       updateOverviewRoute()
+      updateMarkerVisibility()
     }
   },
 )
@@ -98,28 +101,48 @@ watch(overviewModeSignature, () => {
   if (amap.ready.value) updateOverviewRoute()
 })
 
-const getTransportLocations = (transportItem: any) => {
-  let startLoc = null
-  let endLoc = null
+// 定位某交通段的起讫「点位对象」（普通点 item 或酒店 hotel），单天/全天通用。
+// 段首点的起点取上一天酒店；段尾点的终点取当天酒店。
+const getTransportNeighbors = (transportItem: any) => {
+  let startItem: any = null
+  let endItem: any = null
   for (const dp of tripStore.dayPlans) {
     const idx = dp.items.indexOf(transportItem)
     if (idx !== -1) {
       if (idx > 0) {
-        startLoc = dp.items[idx - 1].location
+        startItem = dp.items[idx - 1]
       } else {
         const prevDay = tripStore.dayPlans.find(d => d.day === dp.day - 1)
-        if (prevDay && prevDay.hotel) startLoc = prevDay.hotel.location
+        if (prevDay && prevDay.hotel) startItem = prevDay.hotel
       }
-      
+
       if (idx < dp.items.length - 1) {
-        endLoc = dp.items[idx + 1].location
+        endItem = dp.items[idx + 1]
       } else if (dp.hotel) {
-        endLoc = dp.hotel.location
+        endItem = dp.hotel
       }
       break
     }
   }
-  return { startLoc, endLoc }
+  return { startItem, endItem }
+}
+
+const getTransportLocations = (transportItem: any) => {
+  const { startItem, endItem } = getTransportNeighbors(transportItem)
+  return { startLoc: startItem?.location ?? null, endLoc: endItem?.location ?? null }
+}
+
+// 选中态下的可见点：选中点位→仅该点；选中交通段→起讫两点；总览/按天→全部(null)。
+const updateMarkerVisibility = () => {
+  if (!amap.ready.value) return
+  if (tripStore.activePoiId) {
+    amap.setVisibleMarkers([tripStore.activePoiId])
+  } else if (tripStore.activeTransport) {
+    const { startItem, endItem } = getTransportNeighbors(tripStore.activeTransport)
+    amap.setVisibleMarkers([startItem?.poi_id, endItem?.poi_id].filter(Boolean) as string[])
+  } else {
+    amap.setVisibleMarkers(null)
+  }
 }
 
 // 把若干天的行程拆成「分段总览路线」：每个交通段一条 leg，带自己的 mode。
@@ -171,10 +194,12 @@ watch(
     if (!transportItem) {
       amap.clearRoute()
       updateOverviewRoute()
+      updateMarkerVisibility()
       return
     }
 
     updateOverviewRoute() // Hides the overview route because activeTransport is set
+    updateMarkerVisibility() // 仅显示该交通段的起讫两点
 
     const { startLoc, endLoc } = getTransportLocations(transportItem)
 
