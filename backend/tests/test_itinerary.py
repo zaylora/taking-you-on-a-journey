@@ -121,6 +121,7 @@ def test_default_cost_by_mode():
     assert default_cost_by_mode("步行", 0.5) == 0.0
     assert default_cost_by_mode("公交", 3.0) == 3.0
     assert default_cost_by_mode("驾车", 10.0) > default_cost_by_mode("驾车", 1.0)
+    assert default_cost_by_mode("驾车", 10.0) == 22.0   # 钉死公式 2+2*km
 
 
 def test_insert_transport_links_every_adjacent_pair():
