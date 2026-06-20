@@ -188,59 +188,57 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     overviewRouteInstances = []
   }
 
-  const drawOverviewRoute = (plans: DayPlan[]) => {
+  // 总览路线按段绘制：每段交通用自己的 mode 规划（步行/公交/驾车），
+  // 而非把全天点位串成一条驾车路线。legs 由调用方（MapView）依交通段算好起讫与 mode。
+  const drawOverviewRoute = (legs: Array<{ start: LngLat; end: LngLat; mode?: string }>) => {
     if (!map || !AMap) return
     clearOverviewRoute()
     const myGen = overviewGeneration
 
-    const points: LngLat[] = []
-    for (const dp of plans) {
-      for (const item of dp.items) {
-        if (item.type !== 'transport' && typeof item.location.lng === 'number') {
-          points.push(item.location)
+    for (const leg of legs) {
+      const { start, end } = leg
+      const mode = leg.mode || ''
+      if (!start || !end || typeof start.lng !== 'number' || typeof end.lng !== 'number') continue
+
+      let PluginClass = AMap.Driving
+      const pluginOptions: any = { map, hideMarkers: true, showTraffic: false, autoFitView: false }
+
+      const execSearch = () => {
+        // 公交城市异步返回时，本次总览可能已被新的清除/重绘取代
+        if (myGen !== overviewGeneration) return
+        try {
+          const instance = new PluginClass(pluginOptions)
+          overviewRouteInstances.push(instance)
+          instance.search(
+            [start.lng, start.lat],
+            [end.lng, end.lat],
+            (status: string, result: any) => {
+              // 迟到的孤儿回调：本次绘制已被新的清除/重绘取代，抹掉它刚渲染的路线后退出
+              if (myGen !== overviewGeneration) {
+                instance.clear()
+                return
+              }
+              if (status !== 'complete') {
+                console.warn('总览分段路线规划异常:', result)
+              }
+            }
+          )
+        } catch (e) {
+          console.error('总览分段路线绘制异常:', e)
         }
       }
-      if (dp.hotel && typeof dp.hotel.location.lng === 'number') {
-        points.push(dp.hotel.location)
+
+      if (mode.includes('公交') || mode.includes('地铁')) {
+        PluginClass = AMap.Transfer
+        // 高德公交规划必须指定城市，动态获取当前地图中心所在城市
+        map.getCity((info: any) => {
+          pluginOptions.city = info.city || info.province || '深圳市'
+          execSearch()
+        })
+      } else {
+        if (mode.includes('步行')) PluginClass = AMap.Walking
+        execSearch()
       }
-    }
-
-    if (points.length < 2) return
-
-    const MAX_WP = 16
-    const CHUNK_SIZE = MAX_WP + 1
-
-    for (let i = 0; i < points.length - 1; i += CHUNK_SIZE) {
-      const chunk = points.slice(i, i + CHUNK_SIZE + 1)
-      if (chunk.length < 2) break
-
-      const start = chunk[0]
-      const end = chunk[chunk.length - 1]
-      const waypoints = chunk.slice(1, -1)
-
-      const driving = new AMap.Driving({
-        map: map,
-        hideMarkers: true,
-        showTraffic: false,
-        autoFitView: false
-      })
-
-      driving.search(
-        [start.lng, start.lat],
-        [end.lng, end.lat],
-        { waypoints: waypoints.map(p => [p.lng, p.lat]) },
-        (status: string, result: any) => {
-          // 迟到的孤儿回调：本次绘制已被新的清除/重绘取代，抹掉它刚渲染的路线后退出
-          if (myGen !== overviewGeneration) {
-            driving.clear()
-            return
-          }
-          if (status !== 'complete') {
-            console.warn('总览路线规划异常:', result)
-          }
-        }
-      )
-      overviewRouteInstances.push(driving)
     }
   }
 

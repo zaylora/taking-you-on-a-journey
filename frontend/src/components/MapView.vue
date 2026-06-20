@@ -37,10 +37,10 @@ const updateOverviewRoute = () => {
     amap.clearOverviewRoute()
   } else {
     if (tripStore.activeDay === null) {
-      amap.drawOverviewRoute(tripStore.dayPlans)
+      amap.drawOverviewRoute(buildOverviewLegs(tripStore.dayPlans))
     } else {
       const currentDayPlan = tripStore.dayPlans.find(dp => dp.day === tripStore.activeDay)
-      if (currentDayPlan) amap.drawOverviewRoute([currentDayPlan])
+      if (currentDayPlan) amap.drawOverviewRoute(buildOverviewLegs([currentDayPlan]))
       else amap.clearOverviewRoute()
     }
   }
@@ -74,13 +74,29 @@ watch(mapSignature, () => {
 // activePoiId 变化 → 地图聚焦，并隐藏/恢复总览路线
 watch(
   () => tripStore.activePoiId,
-  (id) => { 
+  (id) => {
     if (amap.ready.value) {
       amap.focusPoi(id)
       updateOverviewRoute()
     }
   },
 )
+
+// 交通方式变化 → 重绘分段总览路线。
+// 单列一个指纹（只含交通段的 mode），避免并入 mapSignature 触发打点重渲染与预取抖动。
+// 总览态外（选中点位/单段）updateOverviewRoute 会自行 clear，互不干扰。
+const overviewModeSignature = computed(() => {
+  const parts: string[] = []
+  for (const dp of tripStore.dayPlans) {
+    for (const item of dp.items) {
+      if (item.type === 'transport') parts.push(`${item.from}>${item.to}:${item.mode}`)
+    }
+  }
+  return parts.join('|')
+})
+watch(overviewModeSignature, () => {
+  if (amap.ready.value) updateOverviewRoute()
+})
 
 const getTransportLocations = (transportItem: any) => {
   let startLoc = null
@@ -104,6 +120,20 @@ const getTransportLocations = (transportItem: any) => {
     }
   }
   return { startLoc, endLoc }
+}
+
+// 把若干天的行程拆成「分段总览路线」：每个交通段一条 leg，带自己的 mode。
+// 复用 getTransportLocations（按全局 dayPlans 定位起讫），单天/全天通用。
+const buildOverviewLegs = (plans: any[]) => {
+  const legs: Array<{ start: any; end: any; mode?: string }> = []
+  for (const dp of plans) {
+    for (const item of dp.items) {
+      if (item.type !== 'transport') continue
+      const { startLoc, endLoc } = getTransportLocations(item)
+      if (startLoc && endLoc) legs.push({ start: startLoc, end: endLoc, mode: item.mode })
+    }
+  }
+  return legs
 }
 
 const prefetchRouteInfos = async () => {
