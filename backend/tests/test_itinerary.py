@@ -65,3 +65,16 @@ def test_mode_by_distance_boundaries():
     assert mode_by_distance(4.9) == "公交"
     assert mode_by_distance(5.0) == "驾车"
     assert mode_by_distance(7.1) == "驾车"
+
+
+def test_pick_nearest_selects_closest_and_respects_used():
+    from app.graph.nodes.itinerary import pick_nearest
+    pool = [
+        {"name": "近", "poi_id": "A", "lng": 113.27, "lat": 23.14},
+        {"name": "远", "poi_id": "B", "lng": 113.40, "lat": 23.30},
+    ]
+    anchor = {"lng": 113.27, "lat": 23.14}
+    assert pick_nearest(pool, anchor, set())["poi_id"] == "A"
+    assert pick_nearest(pool, anchor, {"A"})["poi_id"] == "B"
+    assert pick_nearest(pool, anchor, {"A", "B"}) is None
+    assert pick_nearest([], anchor, set()) is None

@@ -115,6 +115,14 @@ def mode_by_distance(km: float) -> str:
     return "驾车"
 
 
+def pick_nearest(pool: list[dict], anchor: dict, used: set[str]) -> dict | None:
+    """从 pool 里挑离 anchor 最近、poi_id 未用过的一项；无则 None。"""
+    cands = [p for p in pool if p.get("poi_id") and p["poi_id"] not in used]
+    if not cands:
+        return None
+    return min(cands, key=lambda p: haversine_km(p, anchor))
+
+
 def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:
     """手写贪心：按到城市中心的方位角排序 → 均衡切 days 段 → 段内最近邻顺路。
     纯函数、零依赖。接口固定，未来可替换为 KMeans 而不动调用方。
