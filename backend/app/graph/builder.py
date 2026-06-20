@@ -47,12 +47,12 @@ def build_graph(checkpointer=None):
     g.add_edge("reset_plan_new", "clarify")
     g.add_conditional_edges("clarify", route_after_clarify,
                             {"clarify": "clarify", "retrieve": "retrieve"})
-    for n in ("weather", "restaurants", "transport"):
+    # 四路检索并行，统一 fan-in 到 enrich_duration（同深度屏障，避免 itinerary
+    # 多深度入边在不同 superstep 重复触发→day_plans 重复写）。enrich_duration 仅
+    # 读写 attractions 估游玩时长，其余三路 channel 原样透传；之后单边触发 itinerary。
+    for n in ("weather", "attractions", "restaurants", "transport"):
         g.add_edge("retrieve", n)
-        g.add_edge(n, "itinerary")
-    # attractions 先经 enrich_duration 估游玩时长，再汇入 itinerary
-    g.add_edge("retrieve", "attractions")
-    g.add_edge("attractions", "enrich_duration")
+        g.add_edge(n, "enrich_duration")
     g.add_edge("enrich_duration", "itinerary")
     g.add_conditional_edges("itinerary", route_after_plan,
                             {"accommodation": "accommodation", "budget": "budget", "summarize": "summarize"})
