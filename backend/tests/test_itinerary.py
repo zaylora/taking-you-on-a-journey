@@ -4,25 +4,35 @@ from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, Day
 
 
 @pytest.mark.asyncio
-async def test_itinerary_produces_day_plans(monkeypatch):
+async def test_itinerary_algorithm_owns_geometry(monkeypatch, fake_amap):
+    """算法定结构：景点在前、每跳有交通段、餐厅取自周边池；LLM 只补软字段。"""
     from tests.conftest import make_fake_build_llm
+    from app.graph.nodes import itinerary as it_mod
+    # 周边餐厅池（贴近景点）
+    fake_amap["search_around"] = [
+        {"name": "塔下饭", "poi_id": "R1", "lng": 113.325, "lat": 23.107,
+         "address": "", "type": "餐饮服务"},
+    ]
+    # LLM 软填：给景点 A1 一个 cost/note
     fake = DayPlans(days=[DayPlan(
-        day=1, date="2026-07-01",
-        weather=DayWeather(text="多云", temp="24~31℃", is_rainy=False),
-        center=Location(lng=104.06, lat=30.65),
-        items=[PlanItem(type="attraction", name="武侯祠", poi_id="B1",
-                        location=Location(lng=104.04, lat=30.64),
-                        start="09:00", end="11:00", indoor=False, note="三国文化")],
+        day=1, center=Location(lng=113.30, lat=23.12),
+        items=[PlanItem(type="attraction", name="广州塔", poi_id="A1",
+                        location=Location(lng=113.3245, lat=23.1064),
+                        cost=150.0, note="登塔看夜景")],
     )])
     monkeypatch.setattr(it_mod, "build_llm", make_fake_build_llm(structured=fake))
-    state = {"days": 1, "attractions": [{"name": "武侯祠", "poi_id": "B1", "lng": 104.04, "lat": 30.64}],
-             "restaurants": [], "transport": {}, "weather": {"is_rainy": False}}
+    state = {"days": 1, "preferences": {"food": "粤菜"},
+             "attractions": [{"name": "广州塔", "poi_id": "A1", "lng": 113.3245, "lat": 23.1064}],
+             "restaurants": [], "weather": {"is_rainy": False}}
     out = await it_mod.itinerary(state, None)
-    dp = out["day_plans"]
-    assert dp[0]["day"] == 1
-    assert dp[0]["items"][0]["name"] == "武侯祠"
-    assert "center" in dp[0]
+    items = out["day_plans"][0]["items"]
+    types = [it["type"] for it in items]
+    assert types[0] == "attraction" and items[0]["poi_id"] == "A1"
+    assert "transport" in types                      # 至少一段交通（景点→晚餐）
+    assert any(it["type"] == "meal" and it["poi_id"] == "R1" for it in items)  # 餐厅取自周边
+    assert items[0]["cost"] == 150.0 and items[0]["note"] == "登塔看夜景"      # 软字段合并
     assert len(out["daily_centers"]) == 1
+    assert out["plan_version"] == 1
 
 
 def test_plan_item_and_hotel_carry_cost_and_hotel():
@@ -42,10 +52,10 @@ def test_plan_item_and_hotel_carry_cost_and_hotel():
 
 def test_build_payload_injects_budget_advice():
     from app.graph.nodes.itinerary import _build_payload
-    base = {"days": 2, "num_people": 2}
-    assert "budget_advice" not in _build_payload(base, [])
-    with_advice = {**base, "budget_advice": {"over_amount": 500.0, "cut_suggestions": []}}
-    p = _build_payload(with_advice, [])
+    skeleton = [{"day": 1, "items": [], "center": {"lng": 0, "lat": 0}}]
+    base = {"days": 1, "num_people": 2, "weather": {"is_rainy": False}}
+    assert "budget_advice" not in _build_payload(skeleton, base)
+    p = _build_payload(skeleton, {**base, "budget_advice": {"over_amount": 500.0}})
     assert p["budget_advice"]["over_amount"] == 500.0
     assert p["num_people"] == 2
 

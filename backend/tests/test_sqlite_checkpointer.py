@@ -37,4 +37,6 @@ async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
         snap = await graph.aget_state(config)
 
     assert snap.values["city"] == "成都"
-    assert snap.values["day_plans"][0]["items"][0]["name"] == "武侯祠"
+    # 新节点：景点来自算法（amap.search_poi），此测试未配置 fake_amap，
+    # state["attractions"] 为空，items 为空；核心断言只验证状态持久化（city 已还原）。
+    assert len(snap.values["day_plans"]) == 1

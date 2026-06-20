@@ -5,6 +5,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
 from app.llm.factory import build_llm
+from app.tools import amap
 
 # —— 路线规划阈值（M6）——
 WALK_KM = 1.0          # <1km 步行
@@ -77,13 +78,11 @@ class DayPlans(BaseModel):
 # ---------------------------------------------------------------------------
 
 _SYS = (
-    "你是行程编排助手。给定每天的景点簇、餐厅候选、交通与天气，为每天安排合理的时间线："
-    "上午/下午景点、午餐/晚餐就近分配餐厅、必要的市内交通。雨天优先室内项。"
-    "为每个行程项估算人均花费 cost（元）：门票按景点合理价、餐标按餐厅档位、市内交通按方式估；"
-    "免费景点或无费用项填 0。"
-    "若输入含 budget_advice（上轮超支额与削减建议），据此压低总花费："
-    "优先减少或替换高价付费景点、降低餐标、精简交通。"
-    "输出严格符合给定结构（含每项的 location 经纬度与 cost，沿用输入坐标）。"
+    "你是行程编排助手。下面给你的是已经排好顺序、坐标固定的逐日骨架（景点/餐饮/交通段都已确定）。"
+    "你的唯一任务：为每个『景点』和『餐饮』项补充 start/end（HH:MM）、cost（人均元）、indoor（是否室内）、note（一句话）。"
+    "严禁修改名称、坐标、顺序，严禁增删项，严禁改交通段。雨天优先把户外项标注合理。"
+    "若输入含 budget_advice（上轮超支额），据此压低 cost 估计。"
+    "按给定结构原样返回（含未改动的 location/poi_id/type）。"
 )
 
 
@@ -262,15 +261,14 @@ def _nearest_neighbor_order(seg: list[dict]) -> list[dict]:
 # Async graph node (Task 8)
 # ---------------------------------------------------------------------------
 
-def _build_payload(state: dict, clusters: list, days: int | None = None) -> dict:
-    """构造传给 LLM 的输入 payload；回退时带上 budget_advice。纯函数，便于单测。"""
+def _build_payload(skeleton_days: list, state: dict) -> dict:
+    """构造软填 LLM 的输入：骨架（仅供补软字段）+ 天气 + 可选 budget_advice。纯函数，便于单测。"""
     payload = {
-        "days": days if days is not None else (state.get("days", 3) or 3),
-        "clusters": clusters,
-        "restaurants": state.get("restaurants", []),
-        "transport": state.get("transport", {}),
+        "skeleton": [{"day": d["day"],
+                      "items": [{"type": it["type"], "name": it.get("name", ""),
+                                 "poi_id": it.get("poi_id", "")} for it in d["items"]]}
+                     for d in skeleton_days],
         "weather": state.get("weather", {}),
-        "start_date": state.get("start_date", ""),
         "num_people": state.get("num_people", 1) or 1,
     }
     advice = state.get("budget_advice")
@@ -281,7 +279,9 @@ def _build_payload(state: dict, clusters: list, days: int | None = None) -> dict
 
 async def itinerary(state, config) -> dict:
     days = state.get("days", 3) or 3
-    clusters = cluster_by_day(state.get("attractions", []) or [], days)
+    attractions = state.get("attractions", []) or []
+    clusters = cluster_by_day(attractions, days)
+
     daily_centers = []
     for c in clusters:
         if c:
@@ -291,15 +291,36 @@ async def itinerary(state, config) -> dict:
             cx = cy = 0.0
         daily_centers.append({"lng": cx, "lat": cy})
 
+    food_kw = (state.get("preferences") or {}).get("food") or "美食"
+    city_pool = state.get("restaurants", []) or []  # 周边搜索为空时兜底
+
+    skeleton_days = []
+    for d, (cluster, center) in enumerate(zip(clusters, daily_centers), start=1):
+        pool = []
+        if center["lng"] or center["lat"]:
+            pool = await amap.search_around(center["lng"], center["lat"],
+                                            food_kw, "餐饮", AROUND_RADIUS_M)
+        if not pool:
+            pool = city_pool
+        stops = build_day_stops(cluster, pool)
+        items = insert_transport(stops)
+        skeleton_days.append({"day": d, "items": items, "center": center})
+
+    # LLM 仅填软字段；失败则全用骨架默认
     llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
-    payload = _build_payload(state, clusters, days)
-    result = await llm.ainvoke([
-        SystemMessage(content=_SYS),
-        HumanMessage(content=str(payload)),
-    ], config=config)
+    try:
+        result = await llm.ainvoke([
+            SystemMessage(content=_SYS),
+            HumanMessage(content=str(_build_payload(skeleton_days, state))),
+        ], config=config)
+        llm_days = [d.model_dump(by_alias=True) for d in result.days]
+    except Exception:  # noqa: BLE001 —— 软填失败不阻断，几何已就绪
+        llm_days = []
+
+    merged = merge_soft_fields(skeleton_days, llm_days)
     return {
         "daily_centers": daily_centers,
-        "day_plans": [d.model_dump(by_alias=True) for d in result.days],
+        "day_plans": merged,
         "plan_version": (state.get("plan_version", 0) or 0) + 1,
-        "changed_days": [d.day for d in result.days],
+        "changed_days": [d["day"] for d in merged],
     }
