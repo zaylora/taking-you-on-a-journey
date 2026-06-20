@@ -266,6 +266,32 @@ def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:
     return buckets
 
 
+def cluster_kmeans(points: list[dict], days: int) -> list[list[dict]]:
+    """按经纬度 KMeans 聚成 days 群，每群内部最近邻排序。
+    目标：同一天的景点地理紧凑。点数<days 或 sklearn 不可用时回退 cluster_by_day。
+    """
+    days = max(1, days)
+    if not points:
+        return [[] for _ in range(days)]
+    if len(points) < days:
+        return cluster_by_day(points, days)
+    try:
+        from sklearn.cluster import KMeans
+    except ImportError:
+        return cluster_by_day(points, days)
+
+    # 纬度等距投影：经度按 cos(lat) 缩放，避免高纬度经度被高估
+    lat0 = sum(p.get("lat", 0.0) for p in points) / len(points)
+    scale = math.cos(math.radians(lat0)) or 1.0
+    feats = [[p.get("lng", 0.0) * scale, p.get("lat", 0.0)] for p in points]
+    labels = KMeans(n_clusters=days, random_state=42, n_init=10).fit_predict(feats)
+
+    buckets: list[list[dict]] = [[] for _ in range(days)]
+    for p, lbl in zip(points, labels):
+        buckets[int(lbl)].append(p)
+    return [_nearest_neighbor_order(b) for b in buckets]
+
+
 def _nearest_neighbor_order(seg: list[dict]) -> list[dict]:
     if not seg:
         return []
