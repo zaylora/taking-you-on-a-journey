@@ -61,17 +61,21 @@ def fake_amap(monkeypatch):
     cfg = {
         "geocode": {"lng": 104.06, "lat": 30.65},
         "search_poi": [],
+        "search_around": [],
         "get_weather": {"text": "多云", "temp": "24~31℃", "is_rainy": False, "source": "forecast"},
         "plan_route": {},
     }
 
     async def _geocode(city): return cfg["geocode"]
     async def _search_poi(city, keywords, poi_type="", page_size=20): return cfg["search_poi"]
+    async def _search_around(lng, lat, keywords, poi_type="", radius=3000, page_size=20):
+        return cfg["search_around"]
     async def _get_weather(city): return cfg["get_weather"]
     async def _plan_route(origin, dest, mode="transit"): return cfg["plan_route"]
 
     monkeypatch.setattr(amap, "geocode", _geocode)
     monkeypatch.setattr(amap, "search_poi", _search_poi)
+    monkeypatch.setattr(amap, "search_around", _search_around)
     monkeypatch.setattr(amap, "get_weather", _get_weather)
     monkeypatch.setattr(amap, "plan_route", _plan_route)
     return cfg

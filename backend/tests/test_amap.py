@@ -44,3 +44,20 @@ async def test_get_weather_degrades_to_climate(monkeypatch):
     _patch_client(monkeypatch, exc=httpx.TimeoutException("t"))
     w = await amap.get_weather("成都")
     assert w["source"] == "climate" and "is_rainy" in w
+
+
+@pytest.mark.asyncio
+async def test_search_around_ok(monkeypatch):
+    _patch_client(monkeypatch, payload={"status": "1", "pois": [
+        {"name": "陶陶居", "id": "R1", "location": "113.2617,23.1336",
+         "address": "解放北路", "type": "餐饮服务"},
+    ]})
+    out = await amap.search_around(113.2656, 23.1401, "美食", "餐饮")
+    assert out == [{"name": "陶陶居", "poi_id": "R1", "lng": 113.2617, "lat": 23.1336,
+                    "address": "解放北路", "type": "餐饮服务"}]
+
+
+@pytest.mark.asyncio
+async def test_search_around_degrades_on_error(monkeypatch):
+    _patch_client(monkeypatch, exc=httpx.ConnectError("x"))
+    assert await amap.search_around(113.26, 23.14, "美食", "餐饮") == []
