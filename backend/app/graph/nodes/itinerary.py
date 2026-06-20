@@ -6,6 +6,11 @@ from pydantic import BaseModel, Field
 
 from app.llm.factory import build_llm
 
+# —— 路线规划阈值（M6）——
+WALK_KM = 1.0          # <1km 步行
+TRANSIT_KM = 5.0       # 1~5km 公交（含地铁）；>5km 驾车
+AROUND_RADIUS_M = 3000 # 周边餐厅搜索半径(米)
+
 
 # ---------------------------------------------------------------------------
 # Pydantic schemas for structured LLM output
@@ -89,6 +94,25 @@ _SYS = (
 def _dist(a: dict, b: dict) -> float:
     return math.hypot(a.get("lng", 0.0) - b.get("lng", 0.0),
                       a.get("lat", 0.0) - b.get("lat", 0.0))
+
+
+def haversine_km(a: dict, b: dict) -> float:
+    """两点直线距离(km)。手写标准公式（依赖优先原则：单一公式不引依赖）。"""
+    R = 6371.0
+    lat1, lat2 = math.radians(a.get("lat", 0.0)), math.radians(b.get("lat", 0.0))
+    dlat = lat2 - lat1
+    dlng = math.radians(b.get("lng", 0.0) - a.get("lng", 0.0))
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+    return 2 * R * math.asin(math.sqrt(h))
+
+
+def mode_by_distance(km: float) -> str:
+    """按直线距离定交通方式。返回值必须与前端选插件关键字一致。"""
+    if km < WALK_KM:
+        return "步行"
+    if km < TRANSIT_KM:
+        return "公交"
+    return "驾车"
 
 
 def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:

@@ -48,3 +48,20 @@ def test_build_payload_injects_budget_advice():
     p = _build_payload(with_advice, [])
     assert p["budget_advice"]["over_amount"] == 500.0
     assert p["num_people"] == 2
+
+
+def test_haversine_km_known_distance():
+    from app.graph.nodes.itinerary import haversine_km
+    # 越秀公园 → 广州塔 直线约 7km
+    d = haversine_km({"lng": 113.2656, "lat": 23.1401}, {"lng": 113.3245, "lat": 23.1064})
+    assert 6.0 < d < 8.0
+    assert haversine_km({"lng": 113.0, "lat": 23.0}, {"lng": 113.0, "lat": 23.0}) == 0.0
+
+
+def test_mode_by_distance_boundaries():
+    from app.graph.nodes.itinerary import mode_by_distance
+    assert mode_by_distance(0.9) == "步行"
+    assert mode_by_distance(1.0) == "公交"
+    assert mode_by_distance(4.9) == "公交"
+    assert mode_by_distance(5.0) == "驾车"
+    assert mode_by_distance(7.1) == "驾车"
