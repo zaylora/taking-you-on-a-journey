@@ -292,6 +292,46 @@ def cluster_kmeans(points: list[dict], days: int) -> list[list[dict]]:
     return [_nearest_neighbor_order(b) for b in buckets]
 
 
+def _bucket_load(bucket: list[dict]) -> int:
+    """桶内纯景点用时估计（停留 + 每景点固定开销）。"""
+    return sum(attraction_minutes(a) + OVERHEAD_PER_STOP for a in bucket)
+
+
+def _bucket_center(bucket: list[dict]) -> dict:
+    if not bucket:
+        return {"lng": 0.0, "lat": 0.0}
+    return {"lng": sum(a.get("lng", 0.0) for a in bucket) / len(bucket),
+            "lat": sum(a.get("lat", 0.0) for a in bucket) / len(bucket)}
+
+
+def rebalance_by_budget(buckets: list[list[dict]],
+                        day_budget: int = DAY_BUDGET) -> tuple[list[list[dict]], list[dict]]:
+    """超预算的天弹出最低分景点 → 塞入地理最近且有余量的天；无处可塞则丢弃。
+    返回 (balanced_buckets, dropped)。确定性：迁移目标按 (距离, 桶序) 排序。
+    """
+    buckets = [list(b) for b in buckets]
+    dropped: list[dict] = []
+    for i, bucket in enumerate(buckets):
+        # 反复弹出最低分，直到该桶不超预算
+        while _bucket_load(bucket) > day_budget and bucket:
+            victim = min(bucket, key=lambda a: (a.get("rating", 0.0), a.get("poi_id", "")))
+            bucket.remove(victim)
+            need = attraction_minutes(victim) + OVERHEAD_PER_STOP
+            # 候选目标天：有余量者，按到该天中心的距离升序
+            targets = sorted(
+                (j for j in range(len(buckets))
+                 if j != i and _bucket_load(buckets[j]) + need <= day_budget),
+                key=lambda j: (haversine_km(victim, _bucket_center(buckets[j])), j),
+            )
+            if targets:
+                buckets[targets[0]].append(victim)
+            else:
+                dropped.append({**victim, "reason": "各天时间预算已满，无法安排"})
+        buckets[i] = bucket
+    # 迁移后各桶内部重新最近邻排序
+    return [_nearest_neighbor_order(b) for b in buckets], dropped
+
+
 def _nearest_neighbor_order(seg: list[dict]) -> list[dict]:
     if not seg:
         return []
