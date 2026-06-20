@@ -186,6 +186,35 @@ def insert_transport(stops: list[dict]) -> list[dict]:
     return out
 
 
+_SOFT_FIELDS = ("start", "end", "cost", "indoor", "note")
+
+
+def merge_soft_fields(skeleton_days: list[dict], llm_days: list[dict]) -> list[dict]:
+    """把 LLM 的软字段合并进算法骨架：按 day + poi_id 对齐非交通项，仅覆盖非空软字段；
+    顺序、坐标、交通段一律以骨架为准。纯函数，不改输入。"""
+    llm_by_day = {d.get("day"): d for d in llm_days}
+    out = []
+    for sd in skeleton_days:
+        ld = llm_by_day.get(sd.get("day"), {}) or {}
+        soft_by_poi = {it.get("poi_id"): it for it in ld.get("items", [])
+                       if it.get("type") != "transport" and it.get("poi_id")}
+        new_items = []
+        for it in sd.get("items", []):
+            merged = dict(it)
+            if it.get("type") != "transport":
+                src = soft_by_poi.get(it.get("poi_id"))
+                if src:
+                    for k in _SOFT_FIELDS:
+                        v = src.get(k)
+                        if v not in (None, ""):
+                            merged[k] = v
+            new_items.append(merged)
+        nd = dict(sd)
+        nd["items"] = new_items
+        out.append(nd)
+    return out
+
+
 def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:
     """手写贪心：按到城市中心的方位角排序 → 均衡切 days 段 → 段内最近邻顺路。
     纯函数、零依赖。接口固定，未来可替换为 KMeans 而不动调用方。

@@ -142,3 +142,52 @@ def test_insert_transport_links_every_adjacent_pair():
     assert seg["mode"] == "驾车"   # ~7km
     assert out[3]["mode"] == "步行"  # 广州塔→饭 很近
     assert insert_transport(stops[:1]) == stops[:1]  # 单点不插段
+
+
+# ---------------------------------------------------------------------------
+# Task 6 — merge_soft_fields
+# ---------------------------------------------------------------------------
+
+def test_merge_soft_fields_only_copies_soft_keeps_geometry():
+    from app.graph.nodes.itinerary import merge_soft_fields
+    skeleton = [{
+        "day": 1, "center": {"lng": 0, "lat": 0},
+        "items": [
+            {"type": "attraction", "name": "越秀公园", "poi_id": "A1",
+             "location": {"lng": 113.27, "lat": 23.14}},
+            {"type": "transport", "name": "", "from": "越秀公园", "to": "广州塔",
+             "location": {"lng": 113.27, "lat": 23.14}, "mode": "驾车", "cost": 16.0},
+            {"type": "attraction", "name": "广州塔", "poi_id": "A2",
+             "location": {"lng": 113.32, "lat": 23.11}},
+        ],
+    }]
+    # LLM 故意打乱顺序、改坐标、改 mode —— 都必须被丢弃
+    llm = [{
+        "day": 1,
+        "items": [
+            {"type": "attraction", "poi_id": "A2", "location": {"lng": 0, "lat": 0},
+             "start": "14:00", "end": "16:00", "cost": 150.0, "indoor": True, "note": "登塔"},
+            {"type": "attraction", "poi_id": "A1", "location": {"lng": 9, "lat": 9},
+             "start": "09:00", "end": "11:00", "cost": 0.0, "note": "免费公园"},
+            {"type": "transport", "mode": "步行", "cost": 0.0},
+        ],
+    }]
+    out = merge_soft_fields(skeleton, llm)
+    items = out[0]["items"]
+    # 顺序与坐标来自骨架
+    assert [it.get("poi_id", it["type"]) for it in items] == ["A1", "transport", "A2"]
+    assert items[0]["location"] == {"lng": 113.27, "lat": 23.14}
+    assert items[2]["location"] == {"lng": 113.32, "lat": 23.11}
+    # 软字段来自 LLM
+    assert items[0]["note"] == "免费公园" and items[0]["start"] == "09:00"
+    assert items[2]["cost"] == 150.0 and items[2]["indoor"] is True
+    # 交通段几何不动
+    assert items[1]["mode"] == "驾车" and items[1]["cost"] == 16.0
+
+
+def test_merge_soft_fields_tolerates_missing_llm_day():
+    from app.graph.nodes.itinerary import merge_soft_fields
+    skeleton = [{"day": 1, "center": {}, "items": [
+        {"type": "attraction", "name": "X", "poi_id": "A1", "location": {"lng": 1, "lat": 1}}]}]
+    out = merge_soft_fields(skeleton, [])   # LLM 全空 → 原样返回骨架
+    assert out[0]["items"][0]["poi_id"] == "A1"
