@@ -4,7 +4,8 @@ from langchain_core.runnables import RunnableConfig
 from app.llm.factory import build_llm
 
 
-_SYS = "你是旅行助手。只基于当前会话摘要和已有行程回答用户问题，不要重新规划或修改 day_plans。"
+_SYS = ("你是旅行助手。只基于当前会话摘要和已有行程回答用户问题，不要重新规划或修改 day_plans。"
+        "若用户问及某景点为何未安排，可参考 dropped_attractions（含未排入景点及原因）说明。")
 
 
 async def answer(state: dict, config: RunnableConfig) -> dict:
@@ -13,6 +14,7 @@ async def answer(state: dict, config: RunnableConfig) -> dict:
         "conversation_summary": state.get("conversation_summary", ""),
         "day_plans": state.get("day_plans", []) or [],
         "budget": state.get("budget_check", {}) or {},
+        "dropped_attractions": state.get("dropped_attractions", []) or [],
     }
     result = await build_llm(temperature=0).ainvoke(
         [{"role": "system", "content": _SYS}, {"role": "user", "content": str(payload)}],
