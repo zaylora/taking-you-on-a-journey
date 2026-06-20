@@ -253,3 +253,36 @@ cd backend && uv run pytest -q
 ```
 
 关键覆盖：`test_dispatch_agent`（合并判意图+解析）、`test_dispatch_topology`（前半拓扑）、`test_need_routing`（两按需路由）、`test_refine_node`（本地 op）、`test_refine_search`（补检索）、`test_m5fix_e2e`（端到端按 op 选择性重排/跳过）。
+
+## M6 验收清单（路线规划：行程地理质量）
+
+把 `itinerary` 节点从「LLM 出整张行程」改为「**算法主导几何 + LLM 只填软字段**」，根治路线乱七八糟（餐厅折返市中心、交通段瞎编、顺路序被丢弃）。设计见 `docs/superpowers/specs/2026-06-20-route-planning-m6-design.md`。
+
+- **算法权威**：`cluster_by_day` 顺路分天 → 每天 `amap.search_around(簇中心,"餐饮")` 取就近餐厅（空则兜底 `state["restaurants"]` 全城池）→ `build_day_stops` 顺路插午/晚餐（离当前位置最近、去重）→ `insert_transport` 在每对相邻停靠点间插交通段。
+- **交通段**：真实起讫坐标（沿用相邻点）+ 真实 `from/to` 名 + 按直线距离定 `mode`（<1km 步行 / 1~5km 公交 / >5km 驾车）+ `cost` 按 mode 估（步行 0/公交 3/驾车 2+2×km）。每对相邻点都有段、不接酒店（跨天酒店腿不再产生）。
+- **LLM 软填**：仅回填 `start/end/cost/indoor/note`，按 `poi_id` 合并、非空才覆盖；顺序/坐标/交通段一律以算法为准（`merge_soft_fields` 保证 LLM 乱动被丢弃）。LLM 调用 try/except 包裹，失败不阻断（几何已就绪）。
+- **mode 字符串契约**：`步行`/`公交`/`驾车` 与前端 `useAMap.ts` 选插件关键字（Walking/Transfer/Driving）一一对应。
+- **前端**：数据修好后现有分段总览路线自动连成完整路线、按天配色、无 7km 步行怪线；前端**无需改代码**（`vue-tsc -b` 通过）。
+
+### 测试（M6）
+
+```bash
+cd backend && uv run pytest -q
+```
+
+关键覆盖（`test_amap.py` + `test_itinerary.py`）：`search_around` 正常/降级；`haversine_km`/`mode_by_distance` 边界；`pick_nearest` 就近去重；`build_day_stops` 午/晚餐插位与去重；`insert_transport` 全连通 + mode + cost；`merge_soft_fields` 仅并软字段、几何不可被 LLM 污染（对抗性测试）；`test_itinerary_algorithm_owns_geometry` 节点级集成（餐厅来自周边池 + 交通段存在 + 软字段合并）。
+
+### 端到端验收（前端，需 `VITE_AMAP_JS_KEY` + 后端 Key）
+
+```bash
+cd backend && uv run uvicorn app.main:app --reload      # 终端 1
+cd frontend && bun run dev                              # 终端 2
+```
+
+输入「广州 玩 3 天」，行程生成后肉眼核对：
+
+1. **总览路线连续**：每天路线连成一条（不再只连一段），按天配色。
+2. **餐厅贴景点**：用餐点落在当天景点簇附近，无「玩完郊区景点折返市中心吃饭」的长腿。
+3. **交通段选中**：点某交通段 → 只显示起讫两点 + 该段路线，mode 与卡片一致（7km 不再标步行）。
+4. **按天视图**：切到单天，路线与餐厅就近均正确。
+5. **✅ 验收**：餐厅就近、每跳有段且方式合理、总览路线连续不折返。
