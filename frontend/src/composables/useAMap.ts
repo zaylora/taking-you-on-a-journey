@@ -63,19 +63,27 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     clearMarkers()
     if (infoWindow) infoWindow.close()
     const allMarkers: any[] = []
+    let globalPointIndex = 1
+    
     for (const dp of plans) {
       const isActive = activeDay === null || dp.day === activeDay
+      let dayPointIndex = 1
+      
       for (const item of dp.items) {
+        if (item.type === 'transport') continue
         const { lng, lat } = item.location
         if (typeof lng !== 'number' || typeof lat !== 'number') continue
         const color = dayColor(dp.day)
-        const content =
-          `<div class="amap-dot" style="background:${color};opacity:${isActive ? 1 : 0.35};" ` +
-          `title="${item.name}"></div>`
+        
+        const pointIndex = activeDay === null ? globalPointIndex : dayPointIndex
+        const content = isActive
+          ? `<div style="background:${color};opacity:1;color:#fff;border-radius:50%;width:24px;height:24px;line-height:24px;text-align:center;font-size:12px;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.2);" title="${item.name}">${pointIndex}</div>`
+          : `<div class="amap-dot" style="background:${color};opacity:0.35;" title="${item.name}"></div>`
+          
         const marker = new AMap.Marker({
           position: [lng, lat],
           content,
-          offset: new AMap.Pixel(-7, -7),
+          offset: isActive ? new AMap.Pixel(-12, -12) : new AMap.Pixel(-7, -7),
           zIndex: isActive ? 120 : 80,
         })
         marker.on('click', () => {
@@ -83,18 +91,25 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
         })
         map.add(marker)
         markerMap.set(item.poi_id, { marker, name: item.name, item, day: dp.day })
-        allMarkers.push(marker)
+        if (isActive) allMarkers.push(marker)
+        globalPointIndex++
+        dayPointIndex++
       }
       
       if (dp.hotel) {
         const { lng, lat } = dp.hotel.location
         if (typeof lng === 'number' && typeof lat === 'number') {
           const color = dayColor(dp.day)
-          const content = `<div class="amap-dot" style="background:${color};opacity:${isActive ? 1 : 0.35};border-radius:2px;width:12px;height:12px;" title="${dp.hotel.name}"></div>`
+          
+          const pointIndex = activeDay === null ? globalPointIndex : dayPointIndex
+          const content = isActive
+            ? `<div style="background:${color};opacity:1;color:#fff;border-radius:4px;width:24px;height:24px;line-height:24px;text-align:center;font-size:12px;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.2);" title="${dp.hotel.name}">${pointIndex}</div>`
+            : `<div class="amap-dot" style="background:${color};opacity:0.35;border-radius:2px;width:12px;height:12px;" title="${dp.hotel.name}"></div>`
+            
           const marker = new AMap.Marker({
             position: [lng, lat],
             content,
-            offset: new AMap.Pixel(-6, -6),
+            offset: isActive ? new AMap.Pixel(-12, -12) : new AMap.Pixel(-6, -6),
             zIndex: isActive ? 130 : 80,
           })
           marker.on('click', () => {
@@ -102,7 +117,9 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
           })
           map.add(marker)
           markerMap.set(dp.hotel.poi_id, { marker, name: dp.hotel.name, hotel: dp.hotel, day: dp.day })
-          allMarkers.push(marker)
+          if (isActive) allMarkers.push(marker)
+          globalPointIndex++
+          dayPointIndex++
         }
       }
     }
@@ -156,6 +173,75 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
 
   const onMarkerClick = (cb: (poiId: string) => void): void => {
     markerClickCb = cb
+  }
+
+  let overviewRouteInstances: any[] = []
+  // 总览路线绘制代次：每次清除/重绘 +1。在途的异步 search 回调返回时若发现代次已变，
+  // 说明本次绘制已被取代，需把自己刚渲染的路线清掉——否则会留下清不掉的孤儿路线。
+  let overviewGeneration = 0
+
+  const clearOverviewRoute = () => {
+    overviewGeneration++
+    for (const instance of overviewRouteInstances) {
+      if (instance && instance.clear) instance.clear()
+    }
+    overviewRouteInstances = []
+  }
+
+  const drawOverviewRoute = (plans: DayPlan[]) => {
+    if (!map || !AMap) return
+    clearOverviewRoute()
+    const myGen = overviewGeneration
+
+    const points: LngLat[] = []
+    for (const dp of plans) {
+      for (const item of dp.items) {
+        if (item.type !== 'transport' && typeof item.location.lng === 'number') {
+          points.push(item.location)
+        }
+      }
+      if (dp.hotel && typeof dp.hotel.location.lng === 'number') {
+        points.push(dp.hotel.location)
+      }
+    }
+
+    if (points.length < 2) return
+
+    const MAX_WP = 16
+    const CHUNK_SIZE = MAX_WP + 1
+
+    for (let i = 0; i < points.length - 1; i += CHUNK_SIZE) {
+      const chunk = points.slice(i, i + CHUNK_SIZE + 1)
+      if (chunk.length < 2) break
+
+      const start = chunk[0]
+      const end = chunk[chunk.length - 1]
+      const waypoints = chunk.slice(1, -1)
+
+      const driving = new AMap.Driving({
+        map: map,
+        hideMarkers: true,
+        showTraffic: false,
+        autoFitView: false
+      })
+
+      driving.search(
+        [start.lng, start.lat],
+        [end.lng, end.lat],
+        { waypoints: waypoints.map(p => [p.lng, p.lat]) },
+        (status: string, result: any) => {
+          // 迟到的孤儿回调：本次绘制已被新的清除/重绘取代，抹掉它刚渲染的路线后退出
+          if (myGen !== overviewGeneration) {
+            driving.clear()
+            return
+          }
+          if (status !== 'complete') {
+            console.warn('总览路线规划异常:', result)
+          }
+        }
+      )
+      overviewRouteInstances.push(driving)
+    }
   }
 
   const clearRoute = () => {
@@ -257,5 +343,5 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     ready.value = false
   }
 
-  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, destroy, drawRoute, clearRoute, fetchRouteInfo }
+  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, destroy, drawRoute, clearRoute, fetchRouteInfo, drawOverviewRoute, clearOverviewRoute }
 }

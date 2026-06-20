@@ -172,7 +172,7 @@ export const useTripStore = defineStore('trip', () => {
     if (!current) return
     current.dayPlans = plans
     if (plans.length > 0) {
-      current.activeDay = plans[0].day
+      current.activeDay = null
       current.activePoiId = null
     } else {
       current.activeDay = null

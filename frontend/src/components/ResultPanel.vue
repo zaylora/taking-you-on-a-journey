@@ -32,6 +32,13 @@
 
         <div class="day-tabs">
           <button
+            class="day-tab"
+            :class="{ active: tripStore.activeDay === null }"
+            @click="tripStore.setActiveDay(null)"
+          >
+            总览
+          </button>
+          <button
             v-for="dp in tripStore.dayPlans"
             :key="dp.day"
             class="day-tab"
@@ -42,13 +49,15 @@
           </button>
         </div>
 
-        <div v-if="currentDay" class="day-meta">
-          <span>{{ currentDay.weather.text }}</span>
-          <span v-if="currentDay.weather.temp"> · {{ currentDay.weather.temp }}</span>
-        </div>
+        <template v-for="day in (tripStore.activeDay === null ? tripStore.dayPlans : (currentDay ? [currentDay] : []))" :key="day.day">
+          <div class="day-meta" :style="{ marginTop: tripStore.activeDay === null ? '12px' : '0' }">
+            <span v-if="tripStore.activeDay === null" style="font-weight: 600; margin-right: 8px; color: #303133;">Day {{ day.day }}</span>
+            <span>{{ day.weather.text }}</span>
+            <span v-if="day.weather.temp"> · {{ day.weather.temp }}</span>
+          </div>
 
-        <div class="timeline">
-          <template v-for="(item, idx) in (currentDay?.items || []).filter(i => i.type === 'transport' || i.name)" :key="item.poi_id || idx">
+          <div class="timeline">
+            <template v-for="(item, idx) in (day.items || []).filter(i => i.type === 'transport' || i.name)" :key="item.poi_id || idx">
             <!-- 交通条目：显示为紧凑连接行 -->
             <div
               v-if="item.type === 'transport'"
@@ -104,21 +113,22 @@
           </template>
 
           <div
-            v-if="currentDay?.hotel"
+            v-if="day.hotel"
             class="trip-card hotel-card"
-            :class="{ active: currentDay.hotel.poi_id === tripStore.activePoiId }"
-            @click="tripStore.setActivePoi(currentDay.hotel.poi_id)"
+            :class="{ active: day.hotel.poi_id === tripStore.activePoiId }"
+            @click="tripStore.setActivePoi(day.hotel.poi_id)"
           >
             <span class="card-icon">🏨</span>
             <div class="card-text">
-              <div class="card-name">{{ currentDay.hotel.name }}</div>
+              <div class="card-name">{{ day.hotel.name }}</div>
               <div class="card-sub">
-                <span v-if="currentDay.hotel.level" class="card-tag hotel-tag">{{ currentDay.hotel.level }}</span>
-                <span class="card-cost">¥{{ currentDay.hotel.price }}/晚</span>
+                <span v-if="day.hotel.level" class="card-tag hotel-tag">{{ day.hotel.level }}</span>
+                <span class="card-cost">¥{{ day.hotel.price }}/晚</span>
               </div>
             </div>
           </div>
         </div>
+      </template>
       </template>
     </div>
   </div>
