@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from app.graph.nodes.itinerary import insert_transport
+from app.graph.nodes.time_budget import attraction_minutes, day_used_minutes, DAY_BUDGET
 from app.tools import amap
 
 
@@ -69,6 +70,24 @@ def _relax_day(day_plan: dict) -> dict:
     return updated
 
 
+def _relax_until_budget(day_plan: dict) -> dict:
+    """反复删当天最后一个景点/餐饮，直到 day_used_minutes <= DAY_BUDGET（至少删 1 个）。"""
+    updated = dict(day_plan)
+    items = [it for it in (updated.get("items") or []) if it.get("type") != "transport"]
+    removed = False
+    while items and (day_used_minutes(insert_transport(items)) > DAY_BUDGET or not removed):
+        removable = [i for i, it in enumerate(items)
+                     if it.get("type") in ("attraction", "meal") and it.get("name")]
+        if not removable:
+            break
+        items.pop(removable[-1])
+        removed = True
+        if day_used_minutes(insert_transport(items)) <= DAY_BUDGET:
+            break
+    updated["items"] = insert_transport(items)
+    return updated
+
+
 def _reorder_day(day_plan: dict) -> dict:
     updated = dict(day_plan)
     updated["items"] = list(reversed(updated.get("items", []) or []))
@@ -77,13 +96,16 @@ def _reorder_day(day_plan: dict) -> dict:
 
 def _poi_to_item(poi: dict, type_: str) -> dict:
     """高德 POI → PlanItem dict（与 itinerary.PlanItem 字段对齐）。"""
-    return {
+    item = {
         "type": type_,
         "name": poi.get("name", ""),
         "poi_id": poi.get("poi_id", ""),
         "location": {"lng": poi.get("lng", 0.0), "lat": poi.get("lat", 0.0)},
         "start": "", "end": "", "indoor": False, "note": "", "cost": 0.0,
     }
+    if type_ == "attraction":
+        item["visit_minutes"] = attraction_minutes({**poi, "type": poi.get("type", "")})
+    return item
 
 
 def _set_meal(day_plan: dict, new_item: dict) -> dict:
@@ -132,7 +154,10 @@ async def refine(state, config=None) -> dict:
     changed_days: list[int] = []
     extra: dict = {}
 
-    if op in ("relax", "remove", "tighten") and idx is not None:
+    if op == "relax" and idx is not None:
+        day_plans[idx] = _relax_until_budget(day_plans[idx])
+        changed_days = [target_day]
+    elif op in ("remove", "tighten") and idx is not None:
         day_plans[idx] = _rebuild_transport(_relax_day(day_plans[idx]))
         changed_days = [target_day]
     elif op == "reorder" and idx is not None:
