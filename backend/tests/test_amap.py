@@ -54,7 +54,8 @@ async def test_search_around_ok(monkeypatch):
     ]})
     out = await amap.search_around(113.2656, 23.1401, "美食", "餐饮")
     assert out == [{"name": "陶陶居", "poi_id": "R1", "lng": 113.2617, "lat": 23.1336,
-                    "address": "解放北路", "type": "餐饮服务"}]
+                    "address": "解放北路", "type": "餐饮服务",
+                    "rating": 0.0, "cost": 0.0, "opentime": "", "typecode": ""}]
 
 
 @pytest.mark.asyncio
