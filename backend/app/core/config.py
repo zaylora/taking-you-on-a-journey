@@ -7,13 +7,34 @@
 from functools import lru_cache
 
 from pydantic import SecretStr
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic_settings import (
+    BaseSettings,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+)
 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env", env_file_encoding="utf-8", extra="ignore"
     )
+
+    @classmethod
+    def settings_customise_sources(
+        cls,
+        settings_cls: type[BaseSettings],
+        init_settings: PydanticBaseSettingsSource,
+        env_settings: PydanticBaseSettingsSource,
+        dotenv_settings: PydanticBaseSettingsSource,
+        file_secret_settings: PydanticBaseSettingsSource,
+    ) -> tuple[PydanticBaseSettingsSource, ...]:
+        """让 .env 文件优先于 OS 环境变量。
+
+        默认 pydantic 顺序是 env > .env，导致终端里全局的 ANTHROPIC_*/OPENAI_*
+        变量（如 Claude Code 注入的中转地址）会顶掉本项目 .env 的配置。
+        这里把 dotenv 排到 env 前面；init（显式构造参数）仍最高，便于测试覆盖。
+        """
+        return init_settings, dotenv_settings, env_settings, file_secret_settings
 
     llm_provider: str = "openai"
 
