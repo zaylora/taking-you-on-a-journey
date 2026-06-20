@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 from app.llm.factory import build_llm
 from app.tools import amap
+from app.graph.nodes.time_budget import DAY_BUDGET, attraction_minutes
 
 # —— 路线规划阈值（M6）——
 WALK_KM = 1.0          # <1km 步行
@@ -212,6 +213,29 @@ def merge_soft_fields(skeleton_days: list[dict], llm_days: list[dict]) -> list[d
         nd["items"] = new_items
         out.append(nd)
     return out
+
+
+OVERHEAD_PER_STOP = 40  # 每景点分摊的餐饮/交通/缓冲开销(分钟)
+
+
+def select_by_rating(attractions: list[dict], days: int,
+                     day_budget: int = DAY_BUDGET) -> tuple[list[dict], list[dict]]:
+    """按评分降序装到总时间预算，宁缺勿滥。返回 (selected, dropped)。
+    评分相同按 poi_id 字典序保证确定性。dropped 每项带 reason。
+    """
+    total_budget = max(1, days) * day_budget
+    ranked = sorted(attractions,
+                    key=lambda p: (-p.get("rating", 0.0), p.get("poi_id", "")))
+    selected, dropped = [], []
+    used = 0
+    for p in ranked:
+        cost = attraction_minutes(p) + OVERHEAD_PER_STOP
+        if used + cost <= total_budget:
+            selected.append(p)
+            used += cost
+        else:
+            dropped.append({**p, "reason": "超出总时间预算（按评分取舍）"})
+    return selected, dropped
 
 
 def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:

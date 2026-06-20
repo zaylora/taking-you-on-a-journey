@@ -5,8 +5,6 @@
 """
 import math
 
-from app.graph.nodes.itinerary import haversine_km
-
 DAY_BUDGET = 480     # 每天可游玩分钟数（约 8h，09:00-18:00 扣午餐占用）
 LUNCH_MIN = 60
 DINNER_MIN = 60
@@ -48,6 +46,8 @@ def transit_minutes(km: float, mode: str) -> int:
 
 def day_used_minutes(items: list[dict]) -> int:
     """当天总用时：景点停留 + 餐饮占用 + 相邻 transport 段交通耗时。"""
+    # 惰性导入断开与 itinerary 的循环依赖（geometry 比 budget 更底层）
+    from app.graph.nodes.itinerary import haversine_km
     total = 0
     meal_seen = 0
     prev_loc = None
