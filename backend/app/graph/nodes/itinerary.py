@@ -370,7 +370,10 @@ def _build_payload(skeleton_days: list, state: dict) -> dict:
 async def itinerary(state, config) -> dict:
     days = state.get("days", 3) or 3
     attractions = state.get("attractions", []) or []
-    clusters = cluster_by_day(attractions, days)
+    selected, dropped = select_by_rating(attractions, days)
+    clusters = cluster_kmeans(selected, days)
+    clusters, dropped_balance = rebalance_by_budget(clusters)
+    dropped = dropped + dropped_balance
 
     daily_centers = []
     for c in clusters:
@@ -413,4 +416,5 @@ async def itinerary(state, config) -> dict:
         "day_plans": merged,
         "plan_version": (state.get("plan_version", 0) or 0) + 1,
         "changed_days": [d["day"] for d in merged],
+        "dropped_attractions": dropped,
     }
