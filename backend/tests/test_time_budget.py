@@ -43,6 +43,6 @@ def test_day_used_minutes_sums_all():
          "location": {"lng": 113.05, "lat": 23.0}},
     ]
     used = day_used_minutes(items)
-    # 景点 120 + 90，午餐 60，两段交通 > 0
-    assert used >= 120 + 90 + 60
+    # 景点 120 + 90 + 午餐 60 = 270；交通耗时必须 > 0，故总额严格大于 270
+    assert used > 120 + 90 + 60
     assert used < 600

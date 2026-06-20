@@ -45,24 +45,30 @@ def transit_minutes(km: float, mode: str) -> int:
 
 
 def day_used_minutes(items: list[dict]) -> int:
-    """当天总用时：景点停留 + 餐饮占用 + 相邻 transport 段交通耗时。"""
+    """当天总用时：景点停留 + 餐饮占用 + 相邻 transport 段交通耗时。
+
+    transport 段的 location 是其起点坐标，故交通耗时按「前一停靠点 → 后一停靠点」
+    的直线距离配该 transport 的 mode 计算，而非用 transport 自身坐标（否则恒为 0）。
+    """
     # 惰性导入断开与 itinerary 的循环依赖（geometry 比 budget 更底层）
     from app.graph.nodes.itinerary import haversine_km
     total = 0
     meal_seen = 0
-    prev_loc = None
+    prev_stop = None       # 上一个停靠点（景点/餐饮）坐标
+    pending_mode = None    # 等待结算的 transport 段交通方式
     for it in items:
         t = it.get("type")
+        if t == "transport":
+            pending_mode = it.get("mode", "")
+            continue
+        loc = it.get("location") or {}
         if t == "attraction":
             total += attraction_minutes(it)
         elif t == "meal":
             total += LUNCH_MIN if meal_seen == 0 else DINNER_MIN
             meal_seen += 1
-        elif t == "transport":
-            cur = it.get("location") or {}
-            if prev_loc is not None:
-                total += transit_minutes(haversine_km(prev_loc, cur), it.get("mode", ""))
-        loc = it.get("location")
-        if loc:
-            prev_loc = loc
+        if prev_stop is not None and pending_mode is not None:
+            total += transit_minutes(haversine_km(prev_stop, loc), pending_mode)
+        prev_stop = loc
+        pending_mode = None
     return total

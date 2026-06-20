@@ -16,9 +16,10 @@ def test_overloaded_day_sheds_lowest_rating():
     day2 = []
     balanced, dropped = rebalance_by_budget([day1, day2], day_budget=480)
     assert all(_bucket_minutes(b) <= 480 for b in balanced)
-    # 4 个 160min 总 640，可分布到两天（每天≤3个=480），不应丢弃
+    # 4 个 160min 总 640，可分布到两天（每天≤3个=480），应迁移而非丢弃
     kept = sum(len(b) for b in balanced)
-    assert kept + len(dropped) == 4
+    assert kept == 4
+    assert dropped == []
 
 
 def test_drops_when_no_room_anywhere():
