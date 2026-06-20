@@ -78,3 +78,35 @@ def test_pick_nearest_selects_closest_and_respects_used():
     assert pick_nearest(pool, anchor, {"A"})["poi_id"] == "B"
     assert pick_nearest(pool, anchor, {"A", "B"}) is None
     assert pick_nearest([], anchor, set()) is None
+
+
+def test_build_day_stops_inserts_nearby_lunch_and_dinner():
+    from app.graph.nodes.itinerary import build_day_stops
+    attractions = [
+        {"name": "A1", "poi_id": "A1", "lng": 113.27, "lat": 23.14},
+        {"name": "A2", "poi_id": "A2", "lng": 113.33, "lat": 23.11},
+    ]
+    pool = [
+        {"name": "饭A", "poi_id": "RA", "lng": 113.271, "lat": 23.141},  # 贴 A1
+        {"name": "饭B", "poi_id": "RB", "lng": 113.331, "lat": 23.111},  # 贴 A2
+    ]
+    stops = build_day_stops(attractions, pool)
+    assert [s["type"] for s in stops] == ["attraction", "meal", "attraction", "meal"]
+    assert stops[0]["poi_id"] == "A1" and stops[2]["poi_id"] == "A2"
+    assert stops[1]["poi_id"] == "RA"   # 午餐贴 A1
+    assert stops[3]["poi_id"] == "RB"   # 晚餐贴 A2，且与午餐去重
+    assert stops[1]["location"] == {"lng": 113.271, "lat": 23.141}
+
+
+def test_build_day_stops_single_attraction_only_dinner():
+    from app.graph.nodes.itinerary import build_day_stops
+    stops = build_day_stops(
+        [{"name": "A1", "poi_id": "A1", "lng": 113.27, "lat": 23.14}],
+        [{"name": "饭A", "poi_id": "RA", "lng": 113.271, "lat": 23.141}],
+    )
+    assert [s["type"] for s in stops] == ["attraction", "meal"]
+
+
+def test_build_day_stops_empty_attractions():
+    from app.graph.nodes.itinerary import build_day_stops
+    assert build_day_stops([], [{"name": "饭", "poi_id": "R", "lng": 1, "lat": 1}]) == []

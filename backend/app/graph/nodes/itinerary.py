@@ -123,6 +123,39 @@ def pick_nearest(pool: list[dict], anchor: dict, used: set[str]) -> dict | None:
     return min(cands, key=lambda p: haversine_km(p, anchor))
 
 
+def _attraction_item(p: dict) -> dict:
+    return {"type": "attraction", "name": p.get("name", ""), "poi_id": p.get("poi_id", ""),
+            "location": {"lng": p.get("lng", 0.0), "lat": p.get("lat", 0.0)}}
+
+
+def _meal_item(p: dict) -> dict:
+    return {"type": "meal", "name": p.get("name", ""), "poi_id": p.get("poi_id", ""),
+            "location": {"lng": p.get("lng", 0.0), "lat": p.get("lat", 0.0)}}
+
+
+def build_day_stops(attractions_ordered: list[dict], rest_pool: list[dict]) -> list[dict]:
+    """顺路停靠点：景点顺序不变，过半插就近午餐、末尾插就近晚餐（poi 去重）。"""
+    stops: list[dict] = []
+    n = len(attractions_ordered)
+    if n == 0:
+        return stops
+    used: set[str] = set()
+    lunch_after = (n + 1) // 2
+    for i, a in enumerate(attractions_ordered, start=1):
+        stops.append(_attraction_item(a))
+        if n >= 2 and i == lunch_after:
+            r = pick_nearest(rest_pool, {"lng": a.get("lng", 0.0), "lat": a.get("lat", 0.0)}, used)
+            if r:
+                used.add(r["poi_id"])
+                stops.append(_meal_item(r))
+    last = attractions_ordered[-1]
+    dinner = pick_nearest(rest_pool, {"lng": last.get("lng", 0.0), "lat": last.get("lat", 0.0)}, used)
+    if dinner:
+        used.add(dinner["poi_id"])
+        stops.append(_meal_item(dinner))
+    return stops
+
+
 def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:
     """手写贪心：按到城市中心的方位角排序 → 均衡切 days 段 → 段内最近邻顺路。
     纯函数、零依赖。接口固定，未来可替换为 KMeans 而不动调用方。
