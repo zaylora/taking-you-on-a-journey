@@ -4,6 +4,7 @@
 - 有缺口 → interrupt 抛出 {field,question,options}，resume 后写回 clarify_history。
 ⚠️ interrupt 前的评估在 resume 时会重跑，故 temperature=0 保持确定性。
 """
+import re
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import interrupt
@@ -11,6 +12,35 @@ from pydantic import BaseModel, Field
 
 from app.core.constants import MAX_CLARIFY_ROUNDS
 from app.llm.factory import build_llm
+
+_DIRECT_FIELDS = {"city", "start_date"}
+_INT_FIELDS = {"days", "num_people"}
+_FLOAT_FIELDS = {"budget"}
+
+
+def _apply_answer(field: str, answer: str, state: dict) -> dict:
+    """把一条澄清答案并入顶层字段 + normalized_req。未知 field 进 preferences。纯函数。"""
+    req = dict(state.get("normalized_req", {}) or {})
+    patch: dict = {}
+    raw = (answer or "").strip()
+    if field in _INT_FIELDS:
+        m = re.search(r"\d+", raw)
+        val = int(m.group()) if m else req.get(field, 0)
+    elif field in _FLOAT_FIELDS:
+        m = re.search(r"\d+(?:\.\d+)?", raw)
+        val = float(m.group()) if m else req.get(field, 0.0)
+    elif field in _DIRECT_FIELDS:
+        val = raw
+    else:
+        prefs = dict(req.get("preferences", {}) or {})
+        prefs[field] = raw
+        req["preferences"] = prefs
+        patch["preferences"] = prefs
+        return {**patch, "normalized_req": req}
+    req[field] = val
+    patch[field] = val
+    return {**patch, "normalized_req": req}
+
 
 _SYS = (
     "你是旅行需求澄清助手。判断用户需求中仍缺失、影响行程规划的关键要素"
@@ -56,6 +86,7 @@ async def clarify(state, config: RunnableConfig) -> dict:
     payload = {"field": g.field, "question": g.question, "options": g.options}
     answer = interrupt(payload)  # 暂停；resume 后 answer = Command(resume=...) 的值
     return {
+        **_apply_answer(g.field, answer, state),
         "clarify_history": [{**payload, "answer": answer}],
         "clarify_round": rnd + 1,
         "clarified": False,
@@ -63,4 +94,4 @@ async def clarify(state, config: RunnableConfig) -> dict:
 
 
 def route_after_clarify(state) -> str:
-    return "dispatch" if state.get("clarified") else "clarify"
+    return "retrieve" if state.get("clarified") else "clarify"

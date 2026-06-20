@@ -10,7 +10,7 @@ def _extract_final(body: str) -> dict:
 
 
 def _stub(monkeypatch, *, item_cost, hotel_price, budget_limit, days=2, num_people=2):
-    from app.graph.nodes import (clarify as c, dispatch as d, itinerary as it,
+    from app.graph.nodes import (clarify as c, dispatch_agent as d, itinerary as it,
                                   accommodation as acc, summarize as s)
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather, Hotel

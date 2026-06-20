@@ -5,6 +5,7 @@ import { ElMessage } from 'element-plus'
 import type {
   EventName, NodeStartPayload, TokenPayload, NodeEndPayload,
   ErrorPayload, SessionPayload, ClarifyPayload, FinalPayload,
+  TitlePayload, PlanPatchPayload,
 } from '../types'
 
 export function useSSE() {
@@ -15,17 +16,29 @@ export function useSSE() {
   const send = async (message: string) => {
     if (!message.trim()) return
     loading.value = true
-    tripStore.addMessage('user', message)
-    tripStore.clearClarify()
-    tripStore.clearProgress()
-    abortController = new AbortController()
 
     try {
-      await fetchChatStream(message, tripStore.threadId, (eventStr, data) => {
+      const activeThreadId = await tripStore.ensureConversation()
+      tripStore.addMessage('user', message)
+      tripStore.clearClarify()
+      tripStore.clearProgress()
+      abortController = new AbortController()
+
+      await fetchChatStream(message, activeThreadId, (eventStr, data) => {
         switch (eventStr as EventName) {
           case 'session':
             tripStore.setThreadId((data as SessionPayload).thread_id)
             break
+          case 'title': {
+            const p = data as TitlePayload
+            tripStore.setTitle(p.thread_id, p.title)
+            break
+          }
+          case 'plan_patch': {
+            const p = data as PlanPatchPayload
+            tripStore.setPlanVersion(p.plan_version)
+            break
+          }
           case 'node_start': {
             const p = data as NodeStartPayload
             tripStore.startNode(p.node, p.label)
@@ -44,6 +57,10 @@ export function useSSE() {
           case 'final':
             tripStore.setDayPlans((data as FinalPayload).day_plans || [])
             tripStore.setBudget((data as FinalPayload).budget ?? null)
+            if ((data as FinalPayload).plan_version !== undefined) {
+              tripStore.setPlanVersion((data as FinalPayload).plan_version || 0)
+            }
+            tripStore.touchActive()
             loading.value = false
             break
           case 'error':

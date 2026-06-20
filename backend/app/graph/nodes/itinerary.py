@@ -176,4 +176,6 @@ async def itinerary(state, config) -> dict:
     return {
         "daily_centers": daily_centers,
         "day_plans": [d.model_dump(by_alias=True) for d in result.days],
+        "plan_version": (state.get("plan_version", 0) or 0) + 1,
+        "changed_days": [d.day for d in result.days],
     }

@@ -14,13 +14,16 @@ def test_event_constants_present():
     # M2 constants
     assert C.EVENT_SESSION == "session"
     assert C.EVENT_CLARIFY == "clarify"
+    assert C.EVENT_TITLE == "title"
+    assert C.EVENT_PLAN_PATCH == "plan_patch"
+    assert C.EVENT_INTENT == "intent"
     assert C.MAX_CLARIFY_ROUNDS == 4
 
 
 def test_node_labels_cover_all_nodes():
-    assert C.NODES == {"clarify", "dispatch", "weather", "attractions",
-                       "restaurants", "transport", "itinerary",
-                       "accommodation", "budget", "summarize"}
+    assert C.NODES == {"memory", "dispatch_agent", "clarify", "retrieve", "weather", "attractions",
+                       "restaurants", "transport", "itinerary", "refine", "answer",
+                       "accommodation", "budget", "summarize", "memory_update"}
     for n in C.NODES:
         assert C.NODE_LABELS.get(n)  # 每个节点都有非空中文文案
 

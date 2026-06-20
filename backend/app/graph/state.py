@@ -12,6 +12,15 @@ class TripState(TypedDict, total=False):
     messages: Annotated[list, add_messages]
     summary: str
 
+    # —— M5：真正多轮上下文 ——
+    conversation_summary: str
+    memory_context: dict
+    last_intent: str
+    active_plan_id: str
+    refine_request: dict
+    plan_version: int
+    changed_days: list
+
     # —— 结构化需求（dispatch 标准化产出 + clarify 累积）——
     city: str
     start_date: str

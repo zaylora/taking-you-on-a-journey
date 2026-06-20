@@ -13,7 +13,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted, onBeforeUnmount } from 'vue'
+import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { MapLocation, Warning } from '@element-plus/icons-vue'
 import { useTripStore } from '../stores/trip'
 import { useAMap } from '../composables/useAMap'
@@ -27,48 +27,136 @@ onMounted(async () => {
   amap.onMarkerClick((poiId) => tripStore.setActivePoi(poiId))
   if (amap.ready.value && tripStore.dayPlans.length > 0) {
     amap.renderDayPlans(tripStore.dayPlans, tripStore.activeDay)
+    updateOverviewRoute()
+    updateMarkerVisibility()
   }
 })
 
+const updateOverviewRoute = () => {
+  if (!amap.ready.value) return
+  if (tripStore.activePoiId || tripStore.activeTransport) {
+    amap.clearOverviewRoute()
+  } else {
+    if (tripStore.activeDay === null) {
+      amap.drawOverviewRoute(buildOverviewLegs(tripStore.dayPlans))
+    } else {
+      const currentDayPlan = tripStore.dayPlans.find(dp => dp.day === tripStore.activeDay)
+      if (currentDayPlan) amap.drawOverviewRoute(buildOverviewLegs([currentDayPlan]))
+      else amap.clearOverviewRoute()
+    }
+  }
+}
+
 onBeforeUnmount(() => amap.destroy())
 
-// day_plans 或 activeDay 变化 → 重绘打点（含按天配色焦点）
-watch(
-  () => [tripStore.dayPlans, tripStore.activeDay] as const,
-  () => {
-    if (amap.ready.value) amap.renderDayPlans(tripStore.dayPlans, tripStore.activeDay)
-  },
-  { deep: true },
-)
+// 地图指纹：只汇集影响打点与路线的字段（天数、各点位坐标），不含交通段的 routeInfo。
+// 这样预取路程信息时不会触发地图重绘，消除预取期间反复重绘的抖动与重复请求高德。
+const mapSignature = computed(() => {
+  const parts: string[] = [`active:${tripStore.activeDay}`]
+  for (const dp of tripStore.dayPlans) {
+    parts.push(`day:${dp.day}`)
+    for (const item of dp.items) {
+      if (item.type === 'transport') continue
+      parts.push(`${item.poi_id}@${item.location?.lng},${item.location?.lat}`)
+    }
+    if (dp.hotel) parts.push(`hotel:${dp.hotel.poi_id}@${dp.hotel.location?.lng},${dp.hotel.location?.lat}`)
+  }
+  return parts.join('|')
+})
 
-// activePoiId 变化 → 地图聚焦
+// 点位/天数变化 → 重绘打点（含按天配色焦点）与总览路线
+watch(mapSignature, () => {
+  if (amap.ready.value) {
+    amap.renderDayPlans(tripStore.dayPlans, tripStore.activeDay)
+    updateOverviewRoute()
+    updateMarkerVisibility()
+  }
+})
+
+// activePoiId 变化 → 地图聚焦，并隐藏/恢复总览路线
 watch(
   () => tripStore.activePoiId,
-  (id) => { if (amap.ready.value) amap.focusPoi(id) },
+  (id) => {
+    if (amap.ready.value) {
+      amap.focusPoi(id)
+      updateOverviewRoute()
+      updateMarkerVisibility()
+    }
+  },
 )
 
-const getTransportLocations = (transportItem: any) => {
-  let startLoc = null
-  let endLoc = null
+// 交通方式变化 → 重绘分段总览路线。
+// 单列一个指纹（只含交通段的 mode），避免并入 mapSignature 触发打点重渲染与预取抖动。
+// 总览态外（选中点位/单段）updateOverviewRoute 会自行 clear，互不干扰。
+const overviewModeSignature = computed(() => {
+  const parts: string[] = []
+  for (const dp of tripStore.dayPlans) {
+    for (const item of dp.items) {
+      if (item.type === 'transport') parts.push(`${item.from}>${item.to}:${item.mode}`)
+    }
+  }
+  return parts.join('|')
+})
+watch(overviewModeSignature, () => {
+  if (amap.ready.value) updateOverviewRoute()
+})
+
+// 定位某交通段的起讫「点位对象」（普通点 item 或酒店 hotel），单天/全天通用。
+// 段首点的起点取上一天酒店；段尾点的终点取当天酒店。
+const getTransportNeighbors = (transportItem: any) => {
+  let startItem: any = null
+  let endItem: any = null
   for (const dp of tripStore.dayPlans) {
     const idx = dp.items.indexOf(transportItem)
     if (idx !== -1) {
       if (idx > 0) {
-        startLoc = dp.items[idx - 1].location
+        startItem = dp.items[idx - 1]
       } else {
         const prevDay = tripStore.dayPlans.find(d => d.day === dp.day - 1)
-        if (prevDay && prevDay.hotel) startLoc = prevDay.hotel.location
+        if (prevDay && prevDay.hotel) startItem = prevDay.hotel
       }
-      
+
       if (idx < dp.items.length - 1) {
-        endLoc = dp.items[idx + 1].location
+        endItem = dp.items[idx + 1]
       } else if (dp.hotel) {
-        endLoc = dp.hotel.location
+        endItem = dp.hotel
       }
       break
     }
   }
-  return { startLoc, endLoc }
+  return { startItem, endItem }
+}
+
+const getTransportLocations = (transportItem: any) => {
+  const { startItem, endItem } = getTransportNeighbors(transportItem)
+  return { startLoc: startItem?.location ?? null, endLoc: endItem?.location ?? null }
+}
+
+// 选中态下的可见点：选中点位→仅该点；选中交通段→起讫两点；总览/按天→全部(null)。
+const updateMarkerVisibility = () => {
+  if (!amap.ready.value) return
+  if (tripStore.activePoiId) {
+    amap.setVisibleMarkers([tripStore.activePoiId])
+  } else if (tripStore.activeTransport) {
+    const { startItem, endItem } = getTransportNeighbors(tripStore.activeTransport)
+    amap.setVisibleMarkers([startItem?.poi_id, endItem?.poi_id].filter(Boolean) as string[])
+  } else {
+    amap.setVisibleMarkers(null)
+  }
+}
+
+// 把若干天的行程拆成「分段总览路线」：每个交通段一条 leg，带自己的 mode。
+// 复用 getTransportLocations（按全局 dayPlans 定位起讫），单天/全天通用。
+const buildOverviewLegs = (plans: any[]) => {
+  const legs: Array<{ start: any; end: any; mode?: string }> = []
+  for (const dp of plans) {
+    for (const item of dp.items) {
+      if (item.type !== 'transport') continue
+      const { startLoc, endLoc } = getTransportLocations(item)
+      if (startLoc && endLoc) legs.push({ start: startLoc, end: endLoc, mode: item.mode })
+    }
+  }
+  return legs
 }
 
 const prefetchRouteInfos = async () => {
@@ -86,14 +174,16 @@ const prefetchRouteInfos = async () => {
   }
 }
 
+// 预取也改挂在地图指纹上：只有点位变化（新行程/改点）才重新预取，
+// routeInfo 写入不再反过来重启预取，避免重复请求。
 watch(
-  () => [tripStore.dayPlans, amap.ready.value] as const,
-  ([plans, ready]) => {
-    if (ready && plans.length > 0) {
+  () => [mapSignature.value, amap.ready.value] as const,
+  ([, ready]) => {
+    if (ready && tripStore.dayPlans.length > 0) {
       prefetchRouteInfos()
     }
   },
-  { deep: true, immediate: true }
+  { immediate: true }
 )
 
 // activeTransport 变化 → 绘制路线
@@ -103,8 +193,13 @@ watch(
     if (!amap.ready.value) return
     if (!transportItem) {
       amap.clearRoute()
+      updateOverviewRoute()
+      updateMarkerVisibility()
       return
     }
+
+    updateOverviewRoute() // Hides the overview route because activeTransport is set
+    updateMarkerVisibility() // 仅显示该交通段的起讫两点
 
     const { startLoc, endLoc } = getTransportLocations(transportItem)
 

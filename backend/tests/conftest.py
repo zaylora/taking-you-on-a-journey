@@ -78,13 +78,14 @@ def fake_amap(monkeypatch):
 
 
 @pytest.fixture
-def client(monkeypatch):
+def client(monkeypatch, tmp_path):
     """启动 fail-fast 需要 LLM + 高德 Key：用假 Key 绕过；清 settings 缓存让 lifespan 重读。
     节点级 build_llm/_evaluate_gaps 由各测试自行 patch（运行时解析，无需重建 GRAPH）。
     """
     from fastapi.testclient import TestClient
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake")
     monkeypatch.setenv("AMAP_WEB_KEY", "amap-test-fake")
+    monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
     from app.core.config import get_settings
     get_settings.cache_clear()
     from app.main import app

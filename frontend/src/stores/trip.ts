@@ -1,80 +1,228 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
-import type { ClarifyPayload, DayPlan, Budget, TripItem } from '../types'
+import { computed, ref } from 'vue'
+import { createSession, getSession, listSessions } from '../api/sessions'
+import type { ClarifyPayload, DayPlan, Budget, TripItem, SessionSnapshot } from '../types'
 
 export interface Message {
   role: 'user' | 'assistant'
   content: string
-  kind?: 'text' | 'clarify' | 'error'   // clarify 问题气泡区别于普通文本，error 错误消息
+  kind?: 'text' | 'clarify' | 'error'
+}
+
+export interface Conversation {
+  threadId: string
+  title: string
+  messages: Message[]
+  dayPlans: DayPlan[]
+  budget: Budget | null
+  activeDay: number | null
+  activePoiId: string | null
+  activeTransport: TripItem | null
+  planVersion: number
+  updatedAt: string
+}
+
+const STORAGE_KEY = 'trip.activeThreadId'
+
+const emptyConversation = (
+  threadId: string,
+  title = '新的行程',
+  updatedAt = new Date().toISOString(),
+): Conversation => ({
+  threadId,
+  title,
+  messages: [],
+  dayPlans: [],
+  budget: null,
+  activeDay: null,
+  activePoiId: null,
+  activeTransport: null,
+  planVersion: 0,
+  updatedAt,
+})
+
+const budgetFromSnapshot = (snapshot: SessionSnapshot): Budget | null => {
+  if (!snapshot.budget || !('estimated' in snapshot.budget)) return null
+  return snapshot.budget as Budget
 }
 
 export const useTripStore = defineStore('trip', () => {
-  const messages = ref<Message[]>([])
+  const conversations = ref<Conversation[]>([])
+  const activeThreadId = ref<string | null>(localStorage.getItem(STORAGE_KEY))
   const agentProgress = ref<Record<string, 'running' | 'done'>>({})
-  const nodeLabels = ref<Record<string, string>>({})   // node_start 携带的后端友好文案
-  const threadId = ref<string | null>(null)
-  const dayPlans = ref<DayPlan[]>([])
-  const activeDay = ref<number | null>(null)
-  const activePoiId = ref<string | null>(null)
-  const activeTransport = ref<TripItem | null>(null)
+  const nodeLabels = ref<Record<string, string>>({})
   const clarifyPending = ref<ClarifyPayload | null>(null)
-  const budget = ref<Budget | null>(null)
+
+  const activeConversation = computed(() =>
+    conversations.value.find((c) => c.threadId === activeThreadId.value) ?? null,
+  )
+
+  const messages = computed(() => activeConversation.value?.messages ?? [])
+  const threadId = computed(() => activeConversation.value?.threadId ?? activeThreadId.value)
+  const dayPlans = computed(() => activeConversation.value?.dayPlans ?? [])
+  const budget = computed(() => activeConversation.value?.budget ?? null)
+  const activeDay = computed(() => activeConversation.value?.activeDay ?? null)
+  const activePoiId = computed(() => activeConversation.value?.activePoiId ?? null)
+  const activeTransport = computed(() => activeConversation.value?.activeTransport ?? null)
+
+  const upsertConversation = (conversation: Conversation) => {
+    const idx = conversations.value.findIndex((c) => c.threadId === conversation.threadId)
+    if (idx >= 0) conversations.value[idx] = conversation
+    else conversations.value.unshift(conversation)
+    conversations.value.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  }
+
+  const applySnapshot = (snapshot: SessionSnapshot) => {
+    upsertConversation({
+      threadId: snapshot.thread_id,
+      title: snapshot.title,
+      messages: snapshot.messages || [],
+      dayPlans: snapshot.day_plans || [],
+      budget: budgetFromSnapshot(snapshot),
+      activeDay: snapshot.day_plans?.[0]?.day ?? null,
+      activePoiId: null,
+      activeTransport: null,
+      planVersion: snapshot.plan_version || 0,
+      updatedAt: snapshot.updated_at,
+    })
+  }
+
+  const clearProgress = () => {
+    agentProgress.value = {}
+    nodeLabels.value = {}
+  }
+
+  const setActiveThread = (id: string | null) => {
+    activeThreadId.value = id
+    if (id) localStorage.setItem(STORAGE_KEY, id)
+    else localStorage.removeItem(STORAGE_KEY)
+    clarifyPending.value = null
+    clearProgress()
+  }
+
+  const createConversation = async () => {
+    const session = await createSession()
+    upsertConversation(emptyConversation(session.thread_id, session.title, session.updated_at))
+    setActiveThread(session.thread_id)
+    return session.thread_id
+  }
+
+  const ensureConversation = async () => {
+    if (activeConversation.value) return activeConversation.value.threadId
+    return createConversation()
+  }
+
+  const loadConversation = async (id: string) => {
+    const snapshot = await getSession(id)
+    applySnapshot(snapshot)
+    setActiveThread(id)
+  }
+
+  const loadConversations = async () => {
+    const { sessions } = await listSessions()
+    conversations.value = sessions.map((s) => emptyConversation(s.thread_id, s.title, s.updated_at))
+    const preferred = activeThreadId.value && conversations.value.some((c) => c.threadId === activeThreadId.value)
+      ? activeThreadId.value
+      : conversations.value[0]?.threadId ?? null
+    setActiveThread(preferred)
+    if (preferred) await loadConversation(preferred)
+  }
 
   const addMessage = (role: 'user' | 'assistant', content: string, kind: 'text' | 'clarify' | 'error' = 'text') => {
-    messages.value.push({ role, content, kind })
+    activeConversation.value?.messages.push({ role, content, kind })
   }
+
   const appendToLastMessage = (text: string) => {
-    const last = messages.value[messages.value.length - 1]
+    const current = activeConversation.value
+    if (!current) return
+    const last = current.messages[current.messages.length - 1]
     if (!last || last.role !== 'assistant' || last.kind === 'clarify') {
       addMessage('assistant', text)
     } else {
       last.content += text
     }
   }
+
   const startNode = (node: string, label?: string) => {
     agentProgress.value[node] = 'running'
     if (label) nodeLabels.value[node] = label
   }
   const endNode = (node: string) => { agentProgress.value[node] = 'done' }
-  const clearProgress = () => { agentProgress.value = {}; nodeLabels.value = {} }
 
-  const setThreadId = (id: string) => { threadId.value = id }
+  const setThreadId = (id: string) => {
+    if (!conversations.value.some((c) => c.threadId === id)) {
+      upsertConversation(emptyConversation(id))
+    }
+    setActiveThread(id)
+  }
+
+  const setTitle = (id: string, title: string) => {
+    const conversation = conversations.value.find((c) => c.threadId === id)
+    if (conversation) conversation.title = title
+  }
+
   const setClarify = (c: ClarifyPayload) => {
     clarifyPending.value = c
     addMessage('assistant', c.question, 'clarify')
   }
   const clearClarify = () => { clarifyPending.value = null }
+
   const setDayPlans = (plans: DayPlan[]) => {
-    dayPlans.value = plans
+    const current = activeConversation.value
+    if (!current) return
+    current.dayPlans = plans
     if (plans.length > 0) {
-      activeDay.value = plans[0].day
-      activePoiId.value = null
+      current.activeDay = null
+      current.activePoiId = null
     } else {
-      activeDay.value = null
-      activePoiId.value = null
-      activeTransport.value = null
-      budget.value = null
+      current.activeDay = null
+      current.activePoiId = null
+      current.activeTransport = null
+      current.budget = null
     }
   }
+
   const setActiveDay = (d: number | null) => {
-    activeDay.value = d
-    activePoiId.value = null
-    activeTransport.value = null
+    const current = activeConversation.value
+    if (!current) return
+    current.activeDay = d
+    current.activePoiId = null
+    current.activeTransport = null
   }
+
   const setActivePoi = (id: string | null) => {
-    activePoiId.value = id
-    if (id) activeTransport.value = null
+    const current = activeConversation.value
+    if (!current) return
+    current.activePoiId = id
+    if (id) current.activeTransport = null
   }
+
   const setActiveTransport = (item: TripItem | null) => {
-    activeTransport.value = item
-    if (item) activePoiId.value = null
+    const current = activeConversation.value
+    if (!current) return
+    current.activeTransport = item
+    if (item) current.activePoiId = null
   }
-  const setBudget = (b: Budget | null) => { budget.value = b }
+
+  const setBudget = (b: Budget | null) => {
+    if (activeConversation.value) activeConversation.value.budget = b
+  }
+
+  const setPlanVersion = (version: number) => {
+    if (activeConversation.value) activeConversation.value.planVersion = version
+  }
+
+  const touchActive = () => {
+    if (activeConversation.value) activeConversation.value.updatedAt = new Date().toISOString()
+  }
 
   return {
+    conversations, activeThreadId, activeConversation,
     messages, agentProgress, nodeLabels, threadId, dayPlans, clarifyPending,
     activeDay, activePoiId, activeTransport, budget,
+    loadConversations, loadConversation, createConversation, ensureConversation,
     addMessage, appendToLastMessage, startNode, endNode, clearProgress,
-    setThreadId, setClarify, clearClarify, setDayPlans, setActiveDay, setActivePoi, setActiveTransport, setBudget,
+    setThreadId, setTitle, setClarify, clearClarify, setDayPlans, setActiveDay,
+    setActivePoi, setActiveTransport, setBudget, setPlanVersion, touchActive,
   }
 })

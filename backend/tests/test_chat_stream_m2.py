@@ -4,7 +4,7 @@ import re
 
 def _stub_nodes(monkeypatch):
     """clarify 无缺口放行、dispatch/itinerary 给结构化、summarize 流式。检索由 fake_amap 提供。"""
-    from app.graph.nodes import clarify as c, dispatch as d, itinerary as it, summarize as s
+    from app.graph.nodes import clarify as c, dispatch_agent as d, itinerary as it, summarize as s
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
     from tests.conftest import make_fake_build_llm

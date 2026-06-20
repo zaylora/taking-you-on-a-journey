@@ -63,19 +63,27 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     clearMarkers()
     if (infoWindow) infoWindow.close()
     const allMarkers: any[] = []
+    let globalPointIndex = 1
+    
     for (const dp of plans) {
       const isActive = activeDay === null || dp.day === activeDay
+      let dayPointIndex = 1
+      
       for (const item of dp.items) {
+        if (item.type === 'transport') continue
         const { lng, lat } = item.location
         if (typeof lng !== 'number' || typeof lat !== 'number') continue
         const color = dayColor(dp.day)
-        const content =
-          `<div class="amap-dot" style="background:${color};opacity:${isActive ? 1 : 0.35};" ` +
-          `title="${item.name}"></div>`
+        
+        const pointIndex = activeDay === null ? globalPointIndex : dayPointIndex
+        const content = isActive
+          ? `<div style="background:${color};opacity:1;color:#fff;border-radius:50%;width:24px;height:24px;line-height:24px;text-align:center;font-size:12px;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.2);" title="${item.name}">${pointIndex}</div>`
+          : `<div class="amap-dot" style="background:${color};opacity:0.35;" title="${item.name}"></div>`
+          
         const marker = new AMap.Marker({
           position: [lng, lat],
           content,
-          offset: new AMap.Pixel(-7, -7),
+          offset: isActive ? new AMap.Pixel(-12, -12) : new AMap.Pixel(-7, -7),
           zIndex: isActive ? 120 : 80,
         })
         marker.on('click', () => {
@@ -83,18 +91,25 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
         })
         map.add(marker)
         markerMap.set(item.poi_id, { marker, name: item.name, item, day: dp.day })
-        allMarkers.push(marker)
+        if (isActive) allMarkers.push(marker)
+        globalPointIndex++
+        dayPointIndex++
       }
       
       if (dp.hotel) {
         const { lng, lat } = dp.hotel.location
         if (typeof lng === 'number' && typeof lat === 'number') {
           const color = dayColor(dp.day)
-          const content = `<div class="amap-dot" style="background:${color};opacity:${isActive ? 1 : 0.35};border-radius:2px;width:12px;height:12px;" title="${dp.hotel.name}"></div>`
+          
+          const pointIndex = activeDay === null ? globalPointIndex : dayPointIndex
+          const content = isActive
+            ? `<div style="background:${color};opacity:1;color:#fff;border-radius:4px;width:24px;height:24px;line-height:24px;text-align:center;font-size:12px;font-weight:bold;box-shadow:0 2px 4px rgba(0,0,0,0.2);" title="${dp.hotel.name}">${pointIndex}</div>`
+            : `<div class="amap-dot" style="background:${color};opacity:0.35;border-radius:2px;width:12px;height:12px;" title="${dp.hotel.name}"></div>`
+            
           const marker = new AMap.Marker({
             position: [lng, lat],
             content,
-            offset: new AMap.Pixel(-6, -6),
+            offset: isActive ? new AMap.Pixel(-12, -12) : new AMap.Pixel(-6, -6),
             zIndex: isActive ? 130 : 80,
           })
           marker.on('click', () => {
@@ -102,7 +117,9 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
           })
           map.add(marker)
           markerMap.set(dp.hotel.poi_id, { marker, name: dp.hotel.name, hotel: dp.hotel, day: dp.day })
-          allMarkers.push(marker)
+          if (isActive) allMarkers.push(marker)
+          globalPointIndex++
+          dayPointIndex++
         }
       }
     }
@@ -156,6 +173,83 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
 
   const onMarkerClick = (cb: (poiId: string) => void): void => {
     markerClickCb = cb
+  }
+
+  // 选中态下只显示相关点：poiIds=null 时恢复全部显示（总览/按天），
+  // 否则只显示给定 poi_id 的标记（单点=1个，单段路线=起讫2个），其余隐藏。
+  const setVisibleMarkers = (poiIds: string[] | null): void => {
+    if (!map) return
+    for (const [poiId, { marker }] of markerMap.entries()) {
+      if (poiIds === null || poiIds.includes(poiId)) marker.show()
+      else marker.hide()
+    }
+  }
+
+  let overviewRouteInstances: any[] = []
+  // 总览路线绘制代次：每次清除/重绘 +1。在途的异步 search 回调返回时若发现代次已变，
+  // 说明本次绘制已被取代，需把自己刚渲染的路线清掉——否则会留下清不掉的孤儿路线。
+  let overviewGeneration = 0
+
+  const clearOverviewRoute = () => {
+    overviewGeneration++
+    for (const instance of overviewRouteInstances) {
+      if (instance && instance.clear) instance.clear()
+    }
+    overviewRouteInstances = []
+  }
+
+  // 总览路线按段绘制：每段交通用自己的 mode 规划（步行/公交/驾车），
+  // 而非把全天点位串成一条驾车路线。legs 由调用方（MapView）依交通段算好起讫与 mode。
+  const drawOverviewRoute = (legs: Array<{ start: LngLat; end: LngLat; mode?: string }>) => {
+    if (!map || !AMap) return
+    clearOverviewRoute()
+    const myGen = overviewGeneration
+
+    for (const leg of legs) {
+      const { start, end } = leg
+      const mode = leg.mode || ''
+      if (!start || !end || typeof start.lng !== 'number' || typeof end.lng !== 'number') continue
+
+      let PluginClass = AMap.Driving
+      const pluginOptions: any = { map, hideMarkers: true, showTraffic: false, autoFitView: false }
+
+      const execSearch = () => {
+        // 公交城市异步返回时，本次总览可能已被新的清除/重绘取代
+        if (myGen !== overviewGeneration) return
+        try {
+          const instance = new PluginClass(pluginOptions)
+          overviewRouteInstances.push(instance)
+          instance.search(
+            [start.lng, start.lat],
+            [end.lng, end.lat],
+            (status: string, result: any) => {
+              // 迟到的孤儿回调：本次绘制已被新的清除/重绘取代，抹掉它刚渲染的路线后退出
+              if (myGen !== overviewGeneration) {
+                instance.clear()
+                return
+              }
+              if (status !== 'complete') {
+                console.warn('总览分段路线规划异常:', result)
+              }
+            }
+          )
+        } catch (e) {
+          console.error('总览分段路线绘制异常:', e)
+        }
+      }
+
+      if (mode.includes('公交') || mode.includes('地铁')) {
+        PluginClass = AMap.Transfer
+        // 高德公交规划必须指定城市，动态获取当前地图中心所在城市
+        map.getCity((info: any) => {
+          pluginOptions.city = info.city || info.province || '深圳市'
+          execSearch()
+        })
+      } else {
+        if (mode.includes('步行')) PluginClass = AMap.Walking
+        execSearch()
+      }
+    }
   }
 
   const clearRoute = () => {
@@ -257,5 +351,5 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     ready.value = false
   }
 
-  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, destroy, drawRoute, clearRoute, fetchRouteInfo }
+  return { ready, error, init, renderDayPlans, focusPoi, onMarkerClick, setVisibleMarkers, destroy, drawRoute, clearRoute, fetchRouteInfo, drawOverviewRoute, clearOverviewRoute }
 }

@@ -1,4 +1,5 @@
-"""dispatch 节点（M2 升级）：把 query + clarify_history 标准化为结构化需求。"""
+"""dispatch 节点：把当前消息 + 澄清 + 历史偏好标准化为结构化需求。
+（M5 fix 后 dispatch 函数已退役、不再进图；本模块仅为 dispatch_agent 提供 NormalizedReq 与 _SYS。）"""
 from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -8,6 +9,8 @@ from app.llm.factory import build_llm
 _SYS = (
     "把用户的旅行需求整理为结构化字段。缺失项用合理默认：days 默认 3、num_people 默认 1、"
     "budget 默认 0（表示未指定）、start_date 缺失留空字符串。preferences 用键值对概括偏好。"
+    "综合当前用户消息、会话摘要、最近消息和已澄清答案；用户没有重提的偏好可继承，"
+    "用户明确修改的字段以最新消息为准。"
 )
 
 
@@ -30,13 +33,19 @@ async def dispatch(state, config: RunnableConfig) -> dict:
     llm = build_llm(temperature=0).with_structured_output(NormalizedReq, method="function_calling")
     history = state.get("clarify_history", [])
     answered = "；".join(f"{h['field']}={h.get('answer','')}" for h in history) or "（无）"
+    memory = state.get("memory_context", {}) or {}
     req = await llm.ainvoke([
         SystemMessage(content=_SYS),
-        HumanMessage(content=f"原始需求：{state.get('query','')}\n已澄清：{answered}"),
+        HumanMessage(content=str({
+            "当前用户消息": state.get("query", ""),
+            "会话摘要": state.get("conversation_summary", ""),
+            "最近消息": memory.get("recent_messages", []),
+            "当前结构化需求": state.get("normalized_req", {}) or {},
+            "已澄清": answered,
+        })),
     ], config=config)
     data = req.model_dump()
     return {
         **data,
         "normalized_req": data,
-        "messages": [{"role": "user", "content": state.get("query", "")}],
     }

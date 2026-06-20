@@ -4,7 +4,7 @@ from app.graph.nodes.clarify import route_after_clarify, ClarifyGaps, Gap
 
 
 def test_route_after_clarify():
-    assert route_after_clarify({"clarified": True}) == "dispatch"
+    assert route_after_clarify({"clarified": True}) == "retrieve"
     assert route_after_clarify({"clarified": False}) == "clarify"
     assert route_after_clarify({}) == "clarify"
 

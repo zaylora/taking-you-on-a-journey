@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     # 如需用环境变量 CORS_ORIGINS 覆盖，须传 JSON 数组字符串，例如：
     cors_origins: list[str] = ["*"]
 
+    # LangGraph SQLite checkpointer + 本地匿名会话元数据。
+    checkpoint_db_path: str = "./data/checkpoints.sqlite"
+
     def active_api_key(self) -> str:
         """返回当前 provider 的明文 Key（仅供启动校验/构造 SDK 用，勿记日志）。"""
         if self.llm_provider == "anthropic":

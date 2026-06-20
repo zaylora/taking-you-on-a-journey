@@ -10,10 +10,26 @@ export interface Budget {
   retry_count: number
   note: string
 }
-export interface FinalPayload { answer: string; day_plans?: DayPlan[]; budget?: Budget }
+export interface FinalPayload { answer: string; day_plans?: DayPlan[]; budget?: Budget; plan_version?: number }
 export interface ErrorPayload { message: string }
 export interface SessionPayload { thread_id: string }
+export interface TitlePayload { thread_id: string; title: string }
+export interface PlanPatchPayload { plan_version: number; changed_days: number[] }
 export interface ClarifyPayload { field: string; question: string; options: string[] }
+
+export interface SessionListItem {
+  thread_id: string
+  title: string
+  created_at: string
+  updated_at: string
+}
+
+export interface SessionSnapshot extends SessionListItem {
+  messages: Array<{ role: 'user' | 'assistant'; content: string; kind?: 'text' | 'clarify' | 'error' }>
+  day_plans: DayPlan[]
+  budget: Budget | Record<string, never>
+  plan_version: number
+}
 
 export interface LngLat { lng: number; lat: number }
 export interface DayWeather { text: string; temp: string; is_rainy: boolean; source: string }
@@ -48,4 +64,5 @@ export interface DayPlan {
 }
 
 export type EventName =
-  | 'session' | 'node_start' | 'token' | 'node_end' | 'clarify' | 'final' | 'error';
+  | 'session' | 'title' | 'plan_patch' | 'intent'
+  | 'node_start' | 'token' | 'node_end' | 'clarify' | 'final' | 'error';

@@ -91,4 +91,8 @@ def budget(state: TripState) -> dict:
 
 
 def route_after_budget(state: TripState) -> str:
-    return "itinerary" if state.get("budget_check", {}).get("retry") else "summarize"
+    # 仅 plan_new 超支才回全量 itinerary 重排；refine 超支不回退（避免破坏局部修改），
+    # 超支信息随 budget_check.note 透出。
+    plan_new = (state.get("last_intent") or "plan_new") == "plan_new"
+    retry = bool(state.get("budget_check", {}).get("retry"))
+    return "itinerary" if (plan_new and retry) else "summarize"

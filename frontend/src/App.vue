@@ -15,11 +15,21 @@
 </template>
 
 <script setup lang="ts">
+import { onMounted } from 'vue'
 import AppHeader from './components/AppHeader.vue'
 import AppSidebar from './components/AppSidebar.vue'
 import ChatPanel from './components/ChatPanel.vue'
 import MapView from './components/MapView.vue'
 import ResultPanel from './components/ResultPanel.vue'
+import { useTripStore } from './stores/trip'
+
+const tripStore = useTripStore()
+
+onMounted(() => {
+  tripStore.loadConversations().catch((error) => {
+    console.warn('恢复会话列表失败:', error)
+  })
+})
 </script>
 
 <style>
