@@ -200,12 +200,13 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
 
   // 总览路线按段绘制：每段交通用自己的 mode 规划（步行/公交/驾车），
   // 而非把全天点位串成一条驾车路线。legs 由调用方（MapView）依交通段算好起讫与 mode。
-  const drawOverviewRoute = (legs: Array<{ start: LngLat; end: LngLat; mode?: string }>) => {
+  const drawOverviewRoute = async (legs: Array<{ start: LngLat; end: LngLat; mode?: string }>) => {
     if (!map || !AMap) return
     clearOverviewRoute()
     const myGen = overviewGeneration
 
     for (const leg of legs) {
+      if (myGen !== overviewGeneration) break
       const { start, end } = leg
       const mode = leg.mode || ''
       if (!start || !end || typeof start.lng !== 'number' || typeof end.lng !== 'number') continue
@@ -249,6 +250,8 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
         if (mode.includes('步行')) PluginClass = AMap.Walking
         execSearch()
       }
+
+      await new Promise(r => setTimeout(r, 200))
     }
   }
 

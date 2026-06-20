@@ -52,8 +52,8 @@
         <template v-for="day in (tripStore.activeDay === null ? tripStore.dayPlans : (currentDay ? [currentDay] : []))" :key="day.day">
           <div class="day-meta" :style="{ marginTop: tripStore.activeDay === null ? '12px' : '0' }">
             <span v-if="tripStore.activeDay === null" style="font-weight: 600; margin-right: 8px; color: #303133;">Day {{ day.day }}</span>
-            <span>{{ day.weather.text }}</span>
-            <span v-if="day.weather.temp"> · {{ day.weather.temp }}</span>
+            <span v-if="day.weather">{{ day.weather.text }}</span>
+            <span v-if="day.weather && day.weather.temp"> · {{ day.weather.temp }}</span>
           </div>
 
           <div class="timeline">
