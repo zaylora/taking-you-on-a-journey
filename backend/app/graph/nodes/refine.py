@@ -12,6 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from app.graph.nodes.itinerary import insert_transport
 from app.tools import amap
 
 
@@ -22,6 +23,14 @@ class RefineRequest(BaseModel):
     constraints: dict = Field(default_factory=dict)
     needs_search: bool = False
     needs_budget_recheck: bool = True
+
+
+def _rebuild_transport(day_plan: dict) -> dict:
+    """剥掉旧交通段、按当前停靠点顺序重派生（M6 不变量：每对相邻停靠点一段）。"""
+    updated = dict(day_plan)
+    stops = [it for it in (updated.get("items") or []) if it.get("type") != "transport"]
+    updated["items"] = insert_transport(stops)
+    return updated
 
 
 def _infer_op(query: str) -> str:
@@ -124,10 +133,10 @@ async def refine(state, config=None) -> dict:
     extra: dict = {}
 
     if op in ("relax", "remove", "tighten") and idx is not None:
-        day_plans[idx] = _relax_day(day_plans[idx])
+        day_plans[idx] = _rebuild_transport(_relax_day(day_plans[idx]))
         changed_days = [target_day]
     elif op == "reorder" and idx is not None:
-        day_plans[idx] = _reorder_day(day_plans[idx])
+        day_plans[idx] = _rebuild_transport(_reorder_day(day_plans[idx]))
         changed_days = [target_day]
     elif op == "change_budget":
         new_budget = constraints.get("budget")
@@ -159,13 +168,13 @@ async def _apply_search_op(state, day_plans, idx, op, constraints) -> list:
             pois = await amap.search_poi(city, keywords or "美食", "餐饮")
             if not pois:
                 return []
-            day_plans[idx] = _set_meal(day_plans[idx], _poi_to_item(pois[0], "meal"))
+            day_plans[idx] = _rebuild_transport(_set_meal(day_plans[idx], _poi_to_item(pois[0], "meal")))
         else:  # add / replace 景点
             pois = await amap.search_poi(city, keywords or "热门景点", "风景名胜")
             if not pois:
                 return []
             item = _poi_to_item(pois[0], "attraction")
-            day_plans[idx] = _add_or_replace_attraction(day_plans[idx], item, replace=(op == "replace"))
+            day_plans[idx] = _rebuild_transport(_add_or_replace_attraction(day_plans[idx], item, replace=(op == "replace")))
     except Exception:  # noqa: BLE001 —— 检索失败降级，不阻断本轮
         return []
     return [target_day]
