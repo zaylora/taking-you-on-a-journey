@@ -6,7 +6,9 @@ from pydantic import BaseModel, Field
 
 from app.llm.factory import build_llm
 from app.tools import amap
-from app.graph.nodes.time_budget import DAY_BUDGET, attraction_minutes
+from app.graph.nodes.time_budget import (
+    DAY_BUDGET, LUNCH_MIN, DINNER_MIN, attraction_minutes, transit_minutes,
+)
 
 # —— 路线规划阈值（M6）——
 WALK_KM = 1.0          # <1km 步行
@@ -82,6 +84,7 @@ _SYS = (
     "你是行程编排助手。下面给你的是已经排好顺序、坐标固定的逐日骨架（景点/餐饮/交通段都已确定）。"
     "你的唯一任务：为每个『景点』和『餐饮』项补充 start/end（HH:MM）、cost（人均元）、indoor（是否室内）、note（一句话）。"
     "严禁修改名称、坐标、顺序，严禁增删项，严禁改交通段。雨天优先把户外项标注合理。"
+    "若项含 opentime（营业时间），设置 start/end 时务必落在营业时间内（避免早到未开/晚到已闭）。"
     "若输入含 budget_advice（上轮超支额），据此压低 cost 估计。"
     "按给定结构返回（poi_id/type 原样不动，只补软字段）。"
 )
@@ -124,8 +127,16 @@ def pick_nearest(pool: list[dict], anchor: dict, used: set[str]) -> dict | None:
 
 
 def _attraction_item(p: dict) -> dict:
-    return {"type": "attraction", "name": p.get("name", ""), "poi_id": p.get("poi_id", ""),
+    item = {"type": "attraction", "name": p.get("name", ""), "poi_id": p.get("poi_id", ""),
             "location": {"lng": p.get("lng", 0.0), "lat": p.get("lat", 0.0)}}
+    # 透传 enrich 估出的游玩时长，使 day_plans 落地后 refine/budget 重算口径一致
+    vm = p.get("visit_minutes")
+    if isinstance(vm, (int, float)) and vm > 0:
+        item["visit_minutes"] = int(vm)
+    # 透传营业时间，供 LLM 软填 start/end 时参考（晚到/早闭），并可下发前端展示
+    if p.get("opentime"):
+        item["opentime"] = p["opentime"]
+    return item
 
 
 def _meal_item(p: dict) -> dict:
@@ -234,7 +245,8 @@ def select_by_rating(attractions: list[dict], days: int,
             selected.append(p)
             used += cost
         else:
-            dropped.append({**p, "reason": "超出总时间预算（按评分取舍）"})
+            dropped.append({"name": p.get("name", ""), "rating": p.get("rating", 0.0),
+                            "reason": "超出总时间预算（按评分取舍）"})
     return selected, dropped
 
 
@@ -293,8 +305,21 @@ def cluster_kmeans(points: list[dict], days: int) -> list[list[dict]]:
 
 
 def _bucket_load(bucket: list[dict]) -> int:
-    """桶内纯景点用时估计（停留 + 每景点固定开销）。"""
-    return sum(attraction_minutes(a) + OVERHEAD_PER_STOP for a in bucket)
+    """桶内当天用时估计，与 day_used_minutes 同口径：
+    景点停留 + 餐饮占用（≥2 景点配午+晚=120，1 景点配晚餐 60）+ 最近邻顺序的景点间交通。
+    交通用 mode_by_distance 选方式、transit_minutes 估时，保证 rebalance 的预算闸门
+    与下游真实 day_used_minutes 一致（避免分散日实际超预算）。
+    """
+    if not bucket:
+        return 0
+    total = sum(attraction_minutes(a) for a in bucket)
+    total += LUNCH_MIN + DINNER_MIN if len(bucket) >= 2 else DINNER_MIN
+    ordered = _nearest_neighbor_order(bucket)
+    for a, b in zip(ordered, ordered[1:]):
+        km = haversine_km({"lng": a.get("lng", 0.0), "lat": a.get("lat", 0.0)},
+                          {"lng": b.get("lng", 0.0), "lat": b.get("lat", 0.0)})
+        total += transit_minutes(km, mode_by_distance(km))
+    return total
 
 
 def _bucket_center(bucket: list[dict]) -> dict:
@@ -326,7 +351,8 @@ def rebalance_by_budget(buckets: list[list[dict]],
             if targets:
                 buckets[targets[0]].append(victim)
             else:
-                dropped.append({**victim, "reason": "各天时间预算已满，无法安排"})
+                dropped.append({"name": victim.get("name", ""), "rating": victim.get("rating", 0.0),
+                                "reason": "各天时间预算已满，无法安排"})
         buckets[i] = bucket
     # 迁移后各桶内部重新最近邻排序
     return [_nearest_neighbor_order(b) for b in buckets], dropped
@@ -356,7 +382,9 @@ def _build_payload(skeleton_days: list, state: dict) -> dict:
     payload = {
         "skeleton": [{"day": d["day"],
                       "items": [{"type": it["type"], "name": it.get("name", ""),
-                                 "poi_id": it.get("poi_id", "")} for it in d["items"]]}
+                                 "poi_id": it.get("poi_id", ""),
+                                 **({"opentime": it["opentime"]} if it.get("opentime") else {})}
+                                for it in d["items"]]}
                      for d in skeleton_days],
         "weather": state.get("weather", {}),
         "num_people": state.get("num_people", 1) or 1,

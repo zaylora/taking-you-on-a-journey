@@ -39,6 +39,26 @@ async def test_each_day_within_budget(no_llm_no_amap):
         assert day_used_minutes(day["items"]) <= DAY_BUDGET
 
 
+async def test_each_day_within_budget_with_meals_and_transit(monkeypatch):
+    # 诚实场景：真实餐厅池（每天插午/晚餐）+ 地理分散景点，断言真实 day_used_minutes 不超预算。
+    # 守护 review Critical：rebalance 预算闸门须与 day_used_minutes 同口径（含餐饮+交通）。
+    import app.graph.nodes.itinerary as it
+
+    monkeypatch.setattr(it, "build_llm", lambda *a, **k: _FakeLLM())
+
+    async def _pool(lng, lat, *a, **k):
+        # 在当天中心附近返回一家餐厅，使 build_day_stops 真插午/晚餐
+        return [{"name": "餐厅", "poi_id": f"r{lng:.3f}", "lng": lng + 0.002, "lat": lat + 0.002}]
+
+    monkeypatch.setattr(it.amap, "search_around", _pool)
+
+    # 跨度较大的景点（驾车/公交段产生真实交通耗时）
+    attractions = [_a(f"p{i}", 113.0 + i * 0.05, 23.0 + (i % 3) * 0.04, vm=120) for i in range(12)]
+    out = await itinerary({"days": 3, "attractions": attractions}, config={})
+    for day in out["day_plans"]:
+        assert day_used_minutes(day["items"]) <= DAY_BUDGET
+
+
 async def test_reports_dropped(no_llm_no_amap):
     attractions = [_a(f"p{i}", 113.0 + i * 0.01, 23.0, vm=120) for i in range(10)]
     out = await itinerary({"days": 1, "attractions": attractions}, config={})

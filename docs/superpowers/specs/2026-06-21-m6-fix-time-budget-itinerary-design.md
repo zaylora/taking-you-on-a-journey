@@ -64,7 +64,13 @@
 三步纯函数，可单测：
 
 ### 第一步：全局评分预选（治"塞太多/宁缺勿滥"）
-- 候选景点按 `rating` 降序（评分相同按距市中心近优先，保证确定性）。
+- 候选景点按 `rating` 降序（评分相同按 `poi_id` 字典序，保证确定性）。
+
+> 实现备注（M6-fix 收尾）：
+> - `rating` 已端到端流入并被 `select_by_rating` 使用；`visit_minutes` 由 enrich 估出并透传进 day_plans，保证 refine/budget 重算口径一致。
+> - `opentime` 透传进骨架并喂给 LLM 软填（设置 start/end 时落在营业时间内），亦可下发前端展示；算法级"晚到/早闭"硬校验延后。
+> - 富化的 POI `cost`（人均）作为数据已取，但接入 budget 作为兜底/校准与现有"LLM 软填 cost、0.0 视为免费"语义有冲突，**延后**处理，当前 budget 仍以 LLM 软填 cost 为准。
+> - `rebalance_by_budget` 的预算闸门与 `day_used_minutes` 同口径（含餐饮 + 最近邻交通），保证每天真实用时 ≤ DAY_BUDGET。
 - 总预算闸门 `总可用 = days × DAY_BUDGET`。
 - 从高分往下装，每装一个累加 `visit_minutes + 该景点引入的平均餐饮/交通开销估值`，装满总预算即停。
 - 砍掉的进 `dropped_attractions`（`name / rating / reason`）。
