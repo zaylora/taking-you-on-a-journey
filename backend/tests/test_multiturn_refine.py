@@ -36,12 +36,26 @@ def _stub_initial_plan(monkeypatch):
 
 
 def test_second_turn_relaxes_only_target_day(client, fake_amap, monkeypatch):
+    # 新节点：景点来自算法（amap.search_poi），LLM 只填软字段。
+    # 配置三个景点：算法 cluster_by_day(3景点, 2天) → 第1天1个、第2天2个
+    fake_amap["search_poi"] = [
+        {"name": "武侯祠", "poi_id": "B1", "lng": 104.0, "lat": 30.6},
+        {"name": "杜甫草堂", "poi_id": "B2", "lng": 104.1, "lat": 30.7},
+        {"name": "金沙遗址", "poi_id": "B3", "lng": 104.2, "lat": 30.8},
+    ]
     _stub_initial_plan(monkeypatch)
 
     first = client.post("/api/chat", json={"message": "成都2天2人预算4000"}).text
     thread_id = _extract(first, "session")["thread_id"]
     initial = _extract(first, "final")
-    assert [len(day["items"]) for day in initial["day_plans"]] == [1, 2]
+    # 新节点：景点来自算法 cluster_by_day(3景点, 2天) → divmod(3,2)=(1,1)
+    # 前 1 天多 1 个 → day1 得 2 个景点，day2 得 1 个景点
+    assert len(initial["day_plans"]) == 2
+    attraction_counts = [
+        sum(1 for it in day["items"] if it["type"] == "attraction")
+        for day in initial["day_plans"]
+    ]
+    assert attraction_counts == [2, 1]
 
     second = client.post(
         "/api/chat",
@@ -52,5 +66,7 @@ def test_second_turn_relaxes_only_target_day(client, fake_amap, monkeypatch):
 
     assert final["plan_version"] == 2
     assert patch == {"plan_version": 2, "changed_days": [2]}
-    assert [item["name"] for item in final["day_plans"][0]["items"]] == ["武侯祠"]
-    assert [item["name"] for item in final["day_plans"][1]["items"]] == ["杜甫草堂"]
+    # 第一天不动（refine 只改 target_day=2）
+    assert final["day_plans"][0]["items"] == initial["day_plans"][0]["items"]
+    # 第二天被 relax（items 减少 1 个）
+    assert len(final["day_plans"][1]["items"]) < len(initial["day_plans"][1]["items"])

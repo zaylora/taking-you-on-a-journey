@@ -4,12 +4,21 @@ from app.graph.nodes.refine import refine
 
 
 def _plan():
+    """M6 结构：停靠点含 location，items 已插入交通段（与 itinerary 节点输出对齐）。"""
+    from app.graph.nodes.itinerary import insert_transport
+    day1_stops = [
+        {"type": "attraction", "name": "武侯祠", "poi_id": "B1",
+         "location": {"lng": 104.05, "lat": 30.65}},
+        {"type": "meal", "name": "陈麻婆", "poi_id": "M1",
+         "location": {"lng": 104.06, "lat": 30.66}},
+    ]
+    day2_stops = [
+        {"type": "attraction", "name": "杜甫草堂", "poi_id": "B2",
+         "location": {"lng": 104.04, "lat": 30.67}},
+    ]
     return [
-        {"day": 1, "items": [
-            {"type": "attraction", "name": "武侯祠", "poi_id": "B1"},
-            {"type": "meal", "name": "陈麻婆", "poi_id": "M1"}]},
-        {"day": 2, "items": [
-            {"type": "attraction", "name": "杜甫草堂", "poi_id": "B2"}]},
+        {"day": 1, "items": insert_transport(day1_stops)},
+        {"day": 2, "items": insert_transport(day2_stops)},
     ]
 
 
@@ -34,7 +43,9 @@ async def test_add_attraction_appends_to_target_day(fake_amap):
                                 "constraints": {}, "needs_budget_recheck": True}}
     out = await refine(state)
     assert out["changed_days"] == [2]
-    assert [i["name"] for i in out["day_plans"][1]["items"]] == ["杜甫草堂", "宽窄巷子"]
+    # add + rebuild：检查停靠点顺序（items 含交通段，过滤后取名称）
+    day2_stops = [i for i in out["day_plans"][1]["items"] if i.get("type") != "transport"]
+    assert [i["name"] for i in day2_stops] == ["杜甫草堂", "宽窄巷子"]
 
 
 @pytest.mark.asyncio

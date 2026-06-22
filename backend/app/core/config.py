@@ -51,6 +51,9 @@ class Settings(BaseSettings):
     # 高德 Web 服务（后端代理，Key 不下发前端）
     amap_web_key: SecretStr = SecretStr("")
 
+    # Tavily 联网检索（后端代理，Key 不下发前端）
+    tavily_api_key: SecretStr = SecretStr("")
+
     # LangSmith 追踪（可选；设 LANGCHAIN_TRACING_V2=true 启用）
     langchain_tracing_v2: bool = False
     langchain_api_key: SecretStr = SecretStr("")

@@ -44,6 +44,7 @@ class TripState(TypedDict, total=False):
     # —— 行程编排产出 ——
     daily_centers: list
     day_plans: list
+    dropped_attractions: list   # 因评分/预算未排入的景点 [{name,rating,reason}]
 
     # —— M4：住宿嵌入 day_plans + 预算核算 + 超支回退 ——
     budget_check: dict          # {limit,estimated,over,retry,breakdown,retry_count,note}

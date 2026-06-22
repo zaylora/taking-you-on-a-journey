@@ -9,6 +9,7 @@ from app.graph.nodes.clarify import clarify, route_after_clarify
 from app.graph.nodes.retrieve import retrieve
 from app.graph.nodes.weather import weather
 from app.graph.nodes.attractions import attractions
+from app.graph.nodes.enrich_duration import enrich_duration
 from app.graph.nodes.restaurants import restaurants
 from app.graph.nodes.transport import transport
 from app.graph.nodes.itinerary import itinerary
@@ -32,6 +33,7 @@ def build_graph(checkpointer=None):
         ("clarify", clarify), ("retrieve", retrieve),
         ("weather", weather), ("attractions", attractions),
         ("restaurants", restaurants), ("transport", transport),
+        ("enrich_duration", enrich_duration),
         ("itinerary", itinerary), ("accommodation", accommodation),
         ("budget", budget), ("summarize", summarize),
         ("refine", refine), ("answer", answer), ("memory_update", memory_update),
@@ -45,9 +47,13 @@ def build_graph(checkpointer=None):
     g.add_edge("reset_plan_new", "clarify")
     g.add_conditional_edges("clarify", route_after_clarify,
                             {"clarify": "clarify", "retrieve": "retrieve"})
+    # 四路检索并行，统一 fan-in 到 enrich_duration（同深度屏障，避免 itinerary
+    # 多深度入边在不同 superstep 重复触发→day_plans 重复写）。enrich_duration 仅
+    # 读写 attractions 估游玩时长，其余三路 channel 原样透传；之后单边触发 itinerary。
     for n in ("weather", "attractions", "restaurants", "transport"):
         g.add_edge("retrieve", n)
-        g.add_edge(n, "itinerary")
+        g.add_edge(n, "enrich_duration")
+    g.add_edge("enrich_duration", "itinerary")
     g.add_conditional_edges("itinerary", route_after_plan,
                             {"accommodation": "accommodation", "budget": "budget", "summarize": "summarize"})
     g.add_conditional_edges("refine", route_after_plan,

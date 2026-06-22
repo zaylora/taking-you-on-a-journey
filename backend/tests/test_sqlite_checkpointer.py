@@ -2,6 +2,7 @@
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from app.graph.builder import build_graph
+import app.tools.amap as amap
 
 
 async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
@@ -12,6 +13,16 @@ async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
 
     async def no_gaps(_state, _config=None):
         return []
+
+    # 配置 fake amap：search_poi 返回一个已知景点，供算法 cluster_by_day 使用
+    async def _sp(city, keywords, poi_type="", page_size=20):
+        return [{"name": "武侯祠", "poi_id": "B1", "lng": 104.0, "lat": 30.6,
+                 "address": "", "type": "风景名胜"}]
+    monkeypatch.setattr(amap, "search_poi", _sp)
+
+    async def _sa(lng, lat, keywords, poi_type="", radius=3000, page_size=20):
+        return []
+    monkeypatch.setattr(amap, "search_around", _sa)
 
     monkeypatch.setattr(c, "_evaluate_gaps", no_gaps)
     monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
@@ -37,4 +48,8 @@ async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
         snap = await graph.aget_state(config)
 
     assert snap.values["city"] == "成都"
-    assert snap.values["day_plans"][0]["items"][0]["name"] == "武侯祠"
+    # 新节点：景点来自算法（cluster_by_day/build_day_stops），LLM 只填软字段。
+    # 验证持久化内容：武侯祠应出现在第1天 items 中（算法写入，经 SQLite 往返后还原）。
+    assert len(snap.values["day_plans"]) == 1
+    items = snap.values["day_plans"][0]["items"]
+    assert any(it["type"] == "attraction" and it["name"] == "武侯祠" for it in items)

@@ -14,6 +14,24 @@ def _key() -> str:
     return get_settings().amap_web_key.get_secret_value()
 
 
+def _to_float(v) -> float:
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _enrich(p: dict) -> dict:
+    """从高德 POI 提取 biz_ext 详情字段（extensions=all 时可用）。缺失给安全默认。"""
+    biz = p.get("biz_ext") or {}
+    return {
+        "rating": _to_float(biz.get("rating")),
+        "cost": _to_float(biz.get("cost")),
+        "opentime": biz.get("opentime") or "",
+        "typecode": p.get("typecode") or "",
+    }
+
+
 @traceable(run_type="tool", name="amap_geocode")
 async def geocode(city: str) -> dict:
     """城市 → 中心坐标 {lng,lat}。失败降级 {}。"""
@@ -39,6 +57,7 @@ async def search_poi(city: str, keywords: str, poi_type: str = "", page_size: in
             r = await client.get(f"{_BASE}/place/text", params={
                 "key": _key(), "city": city, "keywords": keywords,
                 "types": poi_type, "offset": page_size, "citylimit": "true",
+                "extensions": "all",
             })
             r.raise_for_status()
             data = r.json()
@@ -47,11 +66,43 @@ async def search_poi(city: str, keywords: str, poi_type: str = "", page_size: in
             loc = (p.get("location") or "").split(",")
             if len(loc) != 2:
                 continue
-            out.append({
+            item = {
                 "name": p.get("name", ""), "poi_id": p.get("id", ""),
                 "lng": float(loc[0]), "lat": float(loc[1]),
                 "address": p.get("address", ""), "type": p.get("type", ""),
+            }
+            item.update(_enrich(p))
+            out.append(item)
+        return out
+    except Exception:  # noqa: BLE001
+        return []
+
+
+@traceable(run_type="tool", name="amap_search_around")
+async def search_around(lng: float, lat: float, keywords: str, poi_type: str = "",
+                        radius: int = 3000, page_size: int = 20) -> list[dict]:
+    """围绕坐标的周边检索（高德 place/around，按距离排序）。结构同 search_poi。失败/空 []。"""
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(f"{_BASE}/place/around", params={
+                "key": _key(), "location": f"{lng},{lat}", "keywords": keywords,
+                "types": poi_type, "radius": radius, "offset": page_size,
+                "sortrule": "distance", "extensions": "all",
             })
+            r.raise_for_status()
+            data = r.json()
+        out = []
+        for p in data.get("pois", []) or []:
+            loc = (p.get("location") or "").split(",")
+            if len(loc) != 2:
+                continue
+            item = {
+                "name": p.get("name", ""), "poi_id": p.get("id", ""),
+                "lng": float(loc[0]), "lat": float(loc[1]),
+                "address": p.get("address", ""), "type": p.get("type", ""),
+            }
+            item.update(_enrich(p))
+            out.append(item)
         return out
     except Exception:  # noqa: BLE001
         return []

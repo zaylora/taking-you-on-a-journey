@@ -4,13 +4,23 @@ from app.graph.nodes.refine import refine, _find_day, _reorder_day
 
 
 def _plan():
+    """M6 结构：停靠点含 location，items 已插入交通段（与 itinerary 节点输出对齐）。"""
+    from app.graph.nodes.itinerary import insert_transport
+    day1_stops = [
+        {"type": "attraction", "name": "武侯祠", "poi_id": "B1",
+         "location": {"lng": 104.05, "lat": 30.65}},
+        {"type": "meal", "name": "陈麻婆", "poi_id": "M1",
+         "location": {"lng": 104.06, "lat": 30.66}},
+    ]
+    day2_stops = [
+        {"type": "attraction", "name": "杜甫草堂", "poi_id": "B2",
+         "location": {"lng": 104.04, "lat": 30.67}},
+        {"type": "attraction", "name": "金沙遗址", "poi_id": "B3",
+         "location": {"lng": 104.03, "lat": 30.68}},
+    ]
     return [
-        {"day": 1, "items": [
-            {"type": "attraction", "name": "武侯祠", "poi_id": "B1"},
-            {"type": "meal", "name": "陈麻婆", "poi_id": "M1"}]},
-        {"day": 2, "items": [
-            {"type": "attraction", "name": "杜甫草堂", "poi_id": "B2"},
-            {"type": "attraction", "name": "金沙遗址", "poi_id": "B3"}]},
+        {"day": 1, "items": insert_transport(day1_stops)},
+        {"day": 2, "items": insert_transport(day2_stops)},
     ]
 
 
@@ -31,7 +41,10 @@ async def test_relax_only_target_day():
              "refine_request": {"op": "relax", "target_day": 2, "needs_budget_recheck": True}}
     out = await refine(state)
     assert out["changed_days"] == [2]
-    assert [i["name"] for i in out["day_plans"][0]["items"]] == ["武侯祠", "陈麻婆"]  # 第一天不动
+    # 第一天不动（含交通段）；只检查停靠点名称
+    day1_stops = [i for i in out["day_plans"][0]["items"] if i.get("type") != "transport"]
+    assert [i["name"] for i in day1_stops] == ["武侯祠", "陈麻婆"]
+    # 第二天 relax 后剩 1 个停靠点，insert_transport(<2 stops) 原样返回 → 1 个 item
     assert len(out["day_plans"][1]["items"]) == 1
     assert out["plan_version"] == 2
 
@@ -42,7 +55,10 @@ async def test_reorder_changes_only_order():
              "refine_request": {"op": "reorder", "target_day": 1, "needs_budget_recheck": False}}
     out = await refine(state)
     assert out["changed_days"] == [1]
-    assert [i["name"] for i in out["day_plans"][0]["items"]] == ["陈麻婆", "武侯祠"]
+    # reorder + rebuild：停靠点倒序，交通段重派生；只检查停靠点顺序
+    day1_stops = [i for i in out["day_plans"][0]["items"] if i.get("type") != "transport"]
+    assert [i["name"] for i in day1_stops] == ["陈麻婆", "武侯祠"]
+    # 第二天不动
     assert out["day_plans"][1]["items"] == _plan()[1]["items"]
 
 
