@@ -16,7 +16,8 @@ class MatrixCache:
 
     def __init__(self, db_path: str):
         self.db_path = db_path
-        self._conn = sqlite3.connect(db_path)
+        # asyncio 单线程下当前安全，加 check_same_thread=False 防御后续引入 run_in_executor 时的 ProgrammingError
+        self._conn = sqlite3.connect(db_path, check_same_thread=False)
         self._conn.execute(
             "CREATE TABLE IF NOT EXISTS distance_cache ("
             "poi_a TEXT, poi_b TEXT, minutes REAL, ts REAL, "

@@ -21,6 +21,7 @@ async def test_matrix_uses_amap_and_caches(tmp_path, monkeypatch):
     mat = await M.distance_matrix(nodes, db)
     assert mat[0][0] == 0.0 and mat[1][1] == 0.0
     assert mat[0][1] == pytest.approx(10.0)
+    assert mat[1][0] == pytest.approx(10.0)
     # 第二次：命中缓存，不再调高德
     calls.clear()
     mat2 = await M.distance_matrix(nodes, db)
