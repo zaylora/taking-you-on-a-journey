@@ -22,8 +22,9 @@ class _FakeLLM:
 def no_llm_no_amap(monkeypatch):
     # 断网：LLM 软填抛错走骨架默认；周边餐饮搜索返回空
     import app.graph.nodes.itinerary as it
+    from app.itinerary import soft_fill as sf
 
-    monkeypatch.setattr(it, "build_llm", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(sf, "build_llm", lambda *a, **k: _FakeLLM())
 
     async def _empty(*a, **k):
         return []
@@ -43,8 +44,9 @@ async def test_each_day_within_budget_with_meals_and_transit(monkeypatch):
     # 诚实场景：真实餐厅池（每天插午/晚餐）+ 地理分散景点，断言真实 day_used_minutes 不超预算。
     # 守护 review Critical：rebalance 预算闸门须与 day_used_minutes 同口径（含餐饮+交通）。
     import app.graph.nodes.itinerary as it
+    from app.itinerary import soft_fill as sf
 
-    monkeypatch.setattr(it, "build_llm", lambda *a, **k: _FakeLLM())
+    monkeypatch.setattr(sf, "build_llm", lambda *a, **k: _FakeLLM())
 
     async def _pool(lng, lat, *a, **k):
         # 在当天中心附近返回一家餐厅，使 build_day_stops 真插午/晚餐

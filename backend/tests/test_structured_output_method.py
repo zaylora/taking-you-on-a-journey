@@ -39,12 +39,16 @@ async def test_structured_outputs_use_function_calling(monkeypatch, module_name,
     else:
         from app.graph.nodes import itinerary as mod
         from app.graph.nodes.itinerary import DayPlans
+        from app.itinerary import soft_fill as sf
 
         result = DayPlans(days=[])
         args = (state, None)
 
     recorder = _RecordingStructuredLLM(result)
-    monkeypatch.setattr(mod, "build_llm", lambda **_kwargs: recorder)
+    if result_factory == "itinerary":
+        monkeypatch.setattr(sf, "build_llm", lambda **_kwargs: recorder)
+    else:
+        monkeypatch.setattr(mod, "build_llm", lambda **_kwargs: recorder)
 
     await getattr(mod, node_name)(*args)
 

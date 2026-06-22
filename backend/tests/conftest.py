@@ -72,12 +72,15 @@ def fake_amap(monkeypatch):
         return cfg["search_around"]
     async def _get_weather(city): return cfg["get_weather"]
     async def _plan_route(origin, dest, mode="transit"): return cfg["plan_route"]
+    # 距离矩阵：默认全 None → distance_matrix 降级 haversine，隔离网络且确定性
+    async def _distance_batch(origins, dest): return [None] * len(origins)
 
     monkeypatch.setattr(amap, "geocode", _geocode)
     monkeypatch.setattr(amap, "search_poi", _search_poi)
     monkeypatch.setattr(amap, "search_around", _search_around)
     monkeypatch.setattr(amap, "get_weather", _get_weather)
     monkeypatch.setattr(amap, "plan_route", _plan_route)
+    monkeypatch.setattr(amap, "distance_batch", _distance_batch)
     return cfg
 
 

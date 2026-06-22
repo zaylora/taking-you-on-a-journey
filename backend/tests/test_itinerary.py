@@ -8,6 +8,7 @@ async def test_itinerary_algorithm_owns_geometry(monkeypatch, fake_amap):
     """算法定结构：景点在前、每跳有交通段、餐厅取自周边池；LLM 只补软字段。"""
     from tests.conftest import make_fake_build_llm
     from app.graph.nodes import itinerary as it_mod
+    from app.itinerary import soft_fill as sf_mod
     # 周边餐厅池（贴近景点）
     fake_amap["search_around"] = [
         {"name": "塔下饭", "poi_id": "R1", "lng": 113.325, "lat": 23.107,
@@ -20,7 +21,8 @@ async def test_itinerary_algorithm_owns_geometry(monkeypatch, fake_amap):
                         location=Location(lng=113.3245, lat=23.1064),
                         cost=150.0, note="登塔看夜景")],
     )])
-    monkeypatch.setattr(it_mod, "build_llm", make_fake_build_llm(structured=fake))
+    # 软填的 build_llm 现在在 soft_fill 模块（annotate_soft_fields 内调用）
+    monkeypatch.setattr(sf_mod, "build_llm", make_fake_build_llm(structured=fake))
     state = {"days": 1, "preferences": {"food": "粤菜"},
              "attractions": [{"name": "广州塔", "poi_id": "A1", "lng": 113.3245, "lat": 23.1064}],
              "restaurants": [], "weather": {"is_rainy": False}}

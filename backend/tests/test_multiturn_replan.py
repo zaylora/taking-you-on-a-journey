@@ -11,6 +11,7 @@ def _extract(body: str, event: str) -> dict:
 
 def test_replan_replaces_old_city_and_day_plans(client, fake_amap, monkeypatch):
     from app.graph.nodes import accommodation as acc, clarify as c, dispatch_agent as d, itinerary as it, summarize as s
+    from app.itinerary import soft_fill as sf
     from app.graph.nodes.accommodation import _AccoResult
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
@@ -45,7 +46,7 @@ def test_replan_replaces_old_city_and_day_plans(client, fake_amap, monkeypatch):
         return make_fake_build_llm(structured=next(plans))()
 
     monkeypatch.setattr(d, "build_llm", dispatch_llm)
-    monkeypatch.setattr(it, "build_llm", itinerary_llm)
+    monkeypatch.setattr(sf, "build_llm", itinerary_llm)
     monkeypatch.setattr(acc, "build_llm", make_fake_build_llm(structured=_AccoResult(assignments=[])))
     monkeypatch.setattr(s, "build_llm", make_fake_build_llm(tokens=["攻略"]))
 

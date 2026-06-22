@@ -15,6 +15,7 @@ def _stub(monkeypatch, *, item_cost, hotel_price, budget_limit, days=2, num_peop
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather, Hotel
     from app.graph.nodes.accommodation import _AccoResult, _HotelForDay
+    from app.itinerary import soft_fill as sf
     from tests.conftest import make_fake_build_llm
 
     async def no_gaps(_state, _config=None):
@@ -28,7 +29,7 @@ def _stub(monkeypatch, *, item_cost, hotel_price, budget_limit, days=2, num_peop
                                        location=Location(lng=104.0, lat=30.6),
                                        cost=float(item_cost))])
                for i in range(days)]
-    monkeypatch.setattr(it, "build_llm", make_fake_build_llm(structured=DayPlans(days=dp_days)))
+    monkeypatch.setattr(sf, "build_llm", make_fake_build_llm(structured=DayPlans(days=dp_days)))
     monkeypatch.setattr(acc, "build_llm", make_fake_build_llm(structured=_AccoResult(assignments=[
         _HotelForDay(day=1, hotel=Hotel(name="如家", poi_id="H1",
                                         location=Location(lng=104.0, lat=30.6),

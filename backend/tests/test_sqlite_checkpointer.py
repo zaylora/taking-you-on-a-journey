@@ -9,6 +9,7 @@ async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
     from app.graph.nodes import clarify as c, dispatch_agent as d, itinerary as it, summarize as s
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
+    from app.itinerary import soft_fill as sf
     from tests.conftest import make_fake_build_llm
 
     async def no_gaps(_state, _config=None):
@@ -27,7 +28,7 @@ async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
     monkeypatch.setattr(c, "_evaluate_gaps", no_gaps)
     monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
         structured=NormalizedReq(city="成都", days=1, num_people=1)))
-    monkeypatch.setattr(it, "build_llm", make_fake_build_llm(structured=DayPlans(days=[
+    monkeypatch.setattr(sf, "build_llm", make_fake_build_llm(structured=DayPlans(days=[
         DayPlan(day=1, weather=DayWeather(), center=Location(lng=104.0, lat=30.6),
                 items=[PlanItem(type="attraction", name="武侯祠", poi_id="B1",
                                 location=Location(lng=104.0, lat=30.6))])

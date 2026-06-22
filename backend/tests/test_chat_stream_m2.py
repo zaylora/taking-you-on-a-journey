@@ -7,6 +7,7 @@ def _stub_nodes(monkeypatch):
     from app.graph.nodes import clarify as c, dispatch_agent as d, itinerary as it, summarize as s
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
+    from app.itinerary import soft_fill as sf
     from tests.conftest import make_fake_build_llm
 
     async def no_gaps(_state, _config=None):
@@ -15,7 +16,7 @@ def _stub_nodes(monkeypatch):
     monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
         structured=NormalizedReq(city="成都", days=1, num_people=2,
                                  preferences={"food": "辣"}, budget=2000.0)))
-    monkeypatch.setattr(it, "build_llm", make_fake_build_llm(structured=DayPlans(days=[
+    monkeypatch.setattr(sf, "build_llm", make_fake_build_llm(structured=DayPlans(days=[
         DayPlan(day=1, weather=DayWeather(), center=Location(lng=104.0, lat=30.6),
                 items=[PlanItem(type="attraction", name="武侯祠", poi_id="B1",
                                 location=Location(lng=104.0, lat=30.6))])])))

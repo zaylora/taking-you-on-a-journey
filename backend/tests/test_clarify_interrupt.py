@@ -9,6 +9,7 @@ def _stub_except_clarify(monkeypatch):
     from app.graph.nodes.clarify import Gap
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
+    from app.itinerary import soft_fill as sf
     from tests.conftest import make_fake_build_llm
 
     async def eval_gaps(state, config=None):
@@ -18,7 +19,7 @@ def _stub_except_clarify(monkeypatch):
     monkeypatch.setattr(c, "_evaluate_gaps", eval_gaps)
     monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
         structured=NormalizedReq(city="成都", days=1)))
-    monkeypatch.setattr(it, "build_llm", make_fake_build_llm(structured=DayPlans(days=[
+    monkeypatch.setattr(sf, "build_llm", make_fake_build_llm(structured=DayPlans(days=[
         DayPlan(day=1, center=Location(lng=104.0, lat=30.6),
                 items=[PlanItem(type="attraction", name="武侯祠")])])))
     monkeypatch.setattr(s, "build_llm", make_fake_build_llm(tokens=["第一天", "：武侯祠"]))
