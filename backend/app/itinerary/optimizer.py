@@ -83,16 +83,16 @@ def solve_vrptw(matrix, nodes, days, day_budget, time_windows=None, ratings=None
     days = max(1, days)
     # L0
     r = _solve_once(matrix, nodes, days, day_budget, time_windows, ratings, True)
-    if r is not None and any(r[0]):
+    if r is not None and any(route for route in r[0]):
         return r[0], r[1], 0
     # L1：去时间窗
     r = _solve_once(matrix, nodes, days, day_budget, None, ratings, True)
-    if r is not None and any(r[0]):
+    if r is not None and any(route for route in r[0]):
         return r[0], r[1], 1
     # L2：放宽预算
     r = _solve_once(matrix, nodes, days, int(day_budget * RELAX_BUDGET_FACTOR),
                     None, ratings, True)
-    if r is not None and any(r[0]):
+    if r is not None and any(route for route in r[0]):
         return r[0], r[1], 2
     # L3：去时间维度（纯路由）
     r = _solve_once(matrix, nodes, days, day_budget, None, ratings, False)

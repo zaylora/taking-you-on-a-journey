@@ -50,6 +50,14 @@ def test_balances_across_days_no_empty_day():
     assert all(len(r) <= 2 for r in routes)
 
 
+def test_deterministic_same_input_same_output():
+    # 固定 strategy + 参数 → 同输入多次求解结果一致
+    nodes = [{"visit_minutes": 0}] + [{"visit_minutes": 60} for _ in range(4)]
+    r1 = solve_vrptw(_matrix(), nodes, days=2, day_budget=480)
+    r2 = solve_vrptw(_matrix(), nodes, days=2, day_budget=480)
+    assert r1 == r2
+
+
 def test_relax_when_time_windows_infeasible():
     nodes = [{"visit_minutes": 0}] + [{"visit_minutes": 60} for _ in range(3)]
     mat = [[0]*4] + [[10]*4 for _ in range(3)]
