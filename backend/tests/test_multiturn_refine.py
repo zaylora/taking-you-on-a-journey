@@ -49,14 +49,13 @@ def test_second_turn_relaxes_only_target_day(client, fake_amap, monkeypatch):
     first = client.post("/api/chat", json={"message": "成都2天2人预算4000"}).text
     thread_id = _extract(first, "session")["thread_id"]
     initial = _extract(first, "final")
-    # 新节点：景点来自算法 cluster_by_day(3景点, 2天) → divmod(3,2)=(1,1)
-    # 前 1 天多 1 个 → day1 得 2 个景点，day2 得 1 个景点
+    # 新管线：3 景点分 2 天由 OR-Tools 决定（不锁具体哪天几个），总数与分布正确即可
     assert len(initial["day_plans"]) == 2
     attraction_counts = [
         sum(1 for it in day["items"] if it["type"] == "attraction")
         for day in initial["day_plans"]
     ]
-    assert attraction_counts == [2, 1]
+    assert sorted(attraction_counts) == [1, 2]   # 3 个景点分到 2 天
 
     second = client.post(
         "/api/chat",

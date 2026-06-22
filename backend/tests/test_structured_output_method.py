@@ -20,7 +20,9 @@ class _RecordingStructuredLLM:
     [
         ("clarify", "_evaluate_gaps", {"query": "我想出去玩"}, "clarify"),
         ("dispatch", "dispatch", {"query": "成都3天", "clarify_history": []}, "dispatch"),
-        ("itinerary", "itinerary", {"days": 1, "attractions": []}, "itinerary"),
+        ("itinerary", "itinerary", {"days": 1,
+            "attractions": [{"name": "A", "poi_id": "A1", "lng": 104.0, "lat": 30.6, "rating": 4.5}]},
+         "itinerary"),
     ],
 )
 async def test_structured_outputs_use_function_calling(monkeypatch, module_name, node_name, state, result_factory):
@@ -47,6 +49,12 @@ async def test_structured_outputs_use_function_calling(monkeypatch, module_name,
     recorder = _RecordingStructuredLLM(result)
     if result_factory == "itinerary":
         monkeypatch.setattr(sf, "build_llm", lambda **_kwargs: recorder)
+        # itinerary 新管线还调高德：mock 掉避免真实网络（距离降级 haversine、周边空）
+        import app.tools.amap as amap
+        async def _db(origins, dest): return [None] * len(origins)
+        async def _sa(*a, **k): return []
+        monkeypatch.setattr(amap, "distance_batch", _db)
+        monkeypatch.setattr(amap, "search_around", _sa)
     else:
         monkeypatch.setattr(mod, "build_llm", lambda **_kwargs: recorder)
 
