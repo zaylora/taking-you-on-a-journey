@@ -30,6 +30,10 @@ def test_qa_turn_does_not_retrieve_or_modify_plan(client, fake_amap, monkeypatch
     monkeypatch.setattr(acc, "build_llm", make_fake_build_llm(structured=_AccoResult(assignments=[])))
     monkeypatch.setattr(s, "build_llm", make_fake_build_llm(tokens=["已生成", "成都行程"]))
 
+    # 新管线：景点来自 search_poi（算法建骨架），软填 stub poi_id 须对齐(武侯祠 B1)
+    fake_amap["search_poi"] = [
+        {"name": "武侯祠", "poi_id": "B1", "lng": 104.0, "lat": 30.6, "rating": 4.5},
+    ]
     first = client.post("/api/chat", json={"message": "成都1天2人"}).text
     thread_id = _extract(first, "session")["thread_id"]
     initial = _extract(first, "final")
