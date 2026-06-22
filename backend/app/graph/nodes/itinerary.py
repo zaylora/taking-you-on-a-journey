@@ -8,7 +8,7 @@ import os
 
 from app.core.config import get_settings
 from app.core.constants import AROUND_RADIUS_M
-from app.graph.nodes.time_budget import DAY_BUDGET
+from app.graph.nodes.time_budget import DAY_BUDGET, LUNCH_MIN, DINNER_MIN
 from app.itinerary.prefilter import select_candidates
 from app.itinerary.matrix import distance_matrix
 from app.itinerary.optimizer import solve_vrptw
@@ -20,7 +20,6 @@ from app.tools import amap
 from app.itinerary.geometry import (  # noqa: F401
     haversine_km, mode_by_distance, pick_nearest, build_day_stops,
     default_cost_by_mode, insert_transport,
-    _dist,  # noqa: F401
 )
 from app.itinerary.schemas import (  # noqa: F401
     Location, DayWeather, PlanItem, Hotel, DayPlan, DayPlans,
@@ -62,7 +61,10 @@ async def itinerary(state, config) -> dict:
     ratings = [0.0] + [p.get("rating", 3.0) for p in candidates]
     tw = [(0, DAY_BUDGET)] + [parse_opentime(p.get("opentime", ""), DAY_BUDGET)
                               for p in candidates]
-    routes, dropped_idx, relax = solve_vrptw(matrix, nodes, days, DAY_BUDGET,
+    # 求解预算扣除每日餐饮预留：午+晚餐由 assembler 在求解后插入，不在 OR-Tools 的
+    # time dimension 内。若用满 DAY_BUDGET 排景点+交通，加餐饮后会超预算(498>480)。
+    solve_budget = max(1, DAY_BUDGET - (LUNCH_MIN + DINNER_MIN))
+    routes, dropped_idx, relax = solve_vrptw(matrix, nodes, days, solve_budget,
                                              time_windows=tw, ratings=ratings)
 
     # 就近餐厅池(按每天簇中心)

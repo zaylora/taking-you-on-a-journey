@@ -48,6 +48,11 @@ def _fallback_minutes(a: dict, b: dict) -> float:
     return haversine_km(a, b) / _DRIVE_KMH * 60.0
 
 
+def _unstable(poi_id: str) -> bool:
+    """poi_id 不稳定的虚拟节点（如 depot=__depot__，坐标随会话/城市变）不进缓存。"""
+    return not poi_id or poi_id.startswith("__")
+
+
 async def distance_matrix(nodes: list[dict], db_path: str) -> list[list[float]]:
     """N*N 真实街道时间矩阵(分钟)。优先缓存 -> 缺失批量调高德 -> 单弧失败降级 haversine。"""
     cache = MatrixCache(db_path)
@@ -57,11 +62,17 @@ async def distance_matrix(nodes: list[dict], db_path: str) -> list[list[float]]:
 
     async def fill_dest(j: int) -> None:
         dest_node = nodes[j]
+        dest_id = dest_node["poi_id"]
         missing_idx, missing_orig = [], []
         for i in range(n):
             if i == j:
                 continue
-            cached = cache.get(nodes[i]["poi_id"], dest_node["poi_id"])
+            # depot 等 poi_id 不稳定的虚拟节点（坐标随会话变）不读缓存，避免跨会话脏读
+            if _unstable(nodes[i]["poi_id"]) or _unstable(dest_id):
+                missing_idx.append(i)
+                missing_orig.append((nodes[i]["lng"], nodes[i]["lat"]))
+                continue
+            cached = cache.get(nodes[i]["poi_id"], dest_id)
             if cached is not None:
                 mat[i][j] = cached
             else:
@@ -76,7 +87,9 @@ async def distance_matrix(nodes: list[dict], db_path: str) -> list[list[float]]:
             s = secs[k] if k < len(secs) else None
             minutes = (s / 60.0) if s is not None else _fallback_minutes(nodes[i], dest_node)
             mat[i][j] = minutes
-            cache.put(nodes[i]["poi_id"], dest_node["poi_id"], minutes)
+            # 同理：depot 弧不落缓存（坐标会变，缓存会污染下次规划）
+            if not (_unstable(nodes[i]["poi_id"]) or _unstable(dest_id)):
+                cache.put(nodes[i]["poi_id"], dest_id, minutes)
 
     await asyncio.gather(*(fill_dest(j) for j in range(n)))
     return mat
