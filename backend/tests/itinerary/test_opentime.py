@@ -15,8 +15,18 @@ def test_open_before_0900_clamps_to_zero():
     # 08:30 开门 → 最早到达 0(不早于行程起点)
     lo, hi = parse_opentime("08:30-18:00", 480)
     assert lo == 0
-    # 18:00 关门 → 540 分(以 09:00 为 0),但被 day_budget=480 截断(行程窗口外无法到达)
-    assert hi == min(18 * 60 - 540, 480)  # min(540, 480) = 480
+    # 18:00 关门 → hi=540 分(以 09:00 为 0),不在此合并 day_budget(那是 VRPTW 独立约束)
+    assert hi == 18 * 60 - 540  # 540
+
+
+def test_close_before_0900_returns_full_window():
+    # 关门(08:00)在行程起点 09:00 之前 → hi<=0 → 不约束
+    assert parse_opentime("06:00-08:00", 480) == (0, 480)
+
+
+def test_close_equals_open_returns_full_window():
+    # 关门=开门(异常) → 不约束
+    assert parse_opentime("12:00-12:00", 480) == (0, 480)
 
 
 def test_takes_first_segment_of_multi():

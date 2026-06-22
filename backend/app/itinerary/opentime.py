@@ -32,4 +32,6 @@ def parse_opentime(opentime: str, day_budget: int) -> tuple[int, int]:
     # 关门已在行程起点之前 -> 不约束(交给求解器/降级)
     if hi <= 0:
         return full
-    return (lo, min(hi, day_budget))
+    # 只返回地点的物理时间窗(关门时刻),不在此合并 day_budget——
+    # day_budget 是独立的行程预算约束,由 VRPTW 的 time dimension 上界单独处理。
+    return (lo, hi)
