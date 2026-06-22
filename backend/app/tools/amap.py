@@ -145,3 +145,32 @@ async def plan_route(origin: str, dest: str, mode: str = "transit") -> dict:
             return r.json().get("route", {}) or {}
     except Exception:  # noqa: BLE001
         return {}
+
+
+@traceable(run_type="tool", name="amap_distance_batch")
+async def distance_batch(origins: list[tuple[float, float]],
+                         dest: tuple[float, float]) -> list[float | None]:
+    """高德 v3/distance：多起点->单终点，返回各起点到终点的秒数(type=1 驾车)。
+    失败/缺失项为 None。origins 用 '|' 拼接，注意高德单次 origins 上限(约100)。
+    """
+    if not origins:
+        return []
+    origin_str = "|".join(f"{lng},{lat}" for lng, lat in origins)
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(f"{_BASE}/distance", params={
+                "key": _key(), "origins": origin_str,
+                "destination": f"{dest[0]},{dest[1]}", "type": "1",
+            })
+            r.raise_for_status()
+            results = r.json().get("results") or []
+        by_idx: dict[int, float] = {}
+        for item in results:
+            try:
+                oid = int(item.get("origin_id", 0)) - 1  # 高德 origin_id 从 1 起
+                by_idx[oid] = float(item.get("duration", 0))
+            except (TypeError, ValueError):
+                continue
+        return [by_idx.get(i) for i in range(len(origins))]
+    except Exception:  # noqa: BLE001 -- 降级：全 None，调用方用 haversine 兜底
+        return [None] * len(origins)
