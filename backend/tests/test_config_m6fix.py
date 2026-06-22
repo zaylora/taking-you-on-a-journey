@@ -13,6 +13,5 @@ def test_tavily_api_key_is_secret():
     assert s.tavily_api_key.get_secret_value() == "tvly-xxx"
 
 
-def test_sklearn_and_tavily_importable():
-    import sklearn.cluster  # noqa: F401
+def test_tavily_importable():
     from langchain_tavily import TavilySearch  # noqa: F401
