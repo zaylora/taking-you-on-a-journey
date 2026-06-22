@@ -41,3 +41,21 @@ NODE_LABELS = {
 }
 
 MAX_CLARIFY_ROUNDS = 4   # clarify 自循环轮次上限，超限取兜底放行
+
+# —— itinerary 重做相关阈值常量 ——
+# 求解
+SOLVE_TIME_LIMIT_S: float = 5.0       # OR-Tools 单次求解时限(秒)
+RELAX_BUDGET_FACTOR: float = 1.5      # 三级放松 L2：DAY_BUDGET × 此系数
+
+# 候选预筛
+PER_DAY_CAP: int = 5                  # 每天景点经验上限
+CANDIDATE_MULTIPLIER: float = 1.5     # 预筛上限 = days × PER_DAY_CAP × 此系数
+
+# 距离矩阵
+MATRIX_CONCURRENCY: int = 3           # 高德 distance 并发上限(避 QPS 超限)
+MATRIX_CACHE_TTL_DAYS: int = 30       # 距离缓存有效期(天)
+
+# 交通方式分档(沿用 m6)
+WALK_KM: float = 1.0                  # <1km 步行
+TRANSIT_KM: float = 5.0               # 1~5km 公交；>5km 驾车
+AROUND_RADIUS_M: int = 3000           # 周边餐厅搜索半径(米)
