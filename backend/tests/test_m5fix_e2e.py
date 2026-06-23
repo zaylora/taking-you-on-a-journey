@@ -50,8 +50,17 @@ def _new_plan(client, monkeypatch, fake_amap=None):
 
 def test_change_meal_only_target_day_and_runs_budget(client, fake_amap, monkeypatch):
     tid = _new_plan(client, monkeypatch, fake_amap=fake_amap)
-    # 第二轮：把第一天晚餐换成火锅（search_poi 返回火锅店）
-    fake_amap["search_poi"] = [{"name": "蜀大侠火锅", "poi_id": "M9", "lng": 104.0, "lat": 30.6}]
+    # 第二轮：把第一天晚餐换成火锅（search_around 返回火锅店；replace_poi 走圆心检索）
+    fake_amap["search_around"] = [{"name": "蜀大侠火锅", "poi_id": "M9", "lng": 104.0, "lat": 30.6}]
+    # 第二轮 refine 走 LLM 解析：把 dispatch_agent.build_llm 重打桩为 RefinePlan
+    from app.graph.nodes import dispatch_agent as d
+    from app.graph.nodes.refine_ops import RefinePlan, Operation
+    from tests.conftest import make_fake_build_llm
+    # day1 初始计划已含 meal（陈麻婆），用 replace_poi 命中 meal index 0
+    monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
+        structured=RefinePlan(operations=[Operation(
+            op="replace_poi", day=1, kind="meal", query="火锅",
+            selector={"by": "ordinal", "kind": "meal", "index": 0})])))
     body = client.post("/api/chat",
                        json={"message": "把第一天晚餐换成火锅", "thread_id": tid}).text
     patch = _extract(body, "plan_patch")
@@ -78,6 +87,13 @@ def test_reorder_skips_accommodation_and_budget(client, fake_amap, monkeypatch):
         raise AssertionError("reorder 不应触发 accommodation 节点")
     monkeypatch.setattr(acc_node, "build_llm", boom_build_llm)
 
+    # 第二轮 refine 走 LLM 解析：把 dispatch_agent.build_llm 重打桩为 RefinePlan
+    from app.graph.nodes import dispatch_agent as d
+    from app.graph.nodes.refine_ops import RefinePlan, Operation
+    from tests.conftest import make_fake_build_llm
+    monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
+        structured=RefinePlan(operations=[Operation(op="reorder", day=1, strategy="reverse")])))
+
     body = client.post("/api/chat",
                        json={"message": "第一天顺序调整一下", "thread_id": tid}).text
     patch = _extract(body, "plan_patch")
@@ -86,6 +102,12 @@ def test_reorder_skips_accommodation_and_budget(client, fake_amap, monkeypatch):
 
 def test_change_budget_updates_limit(client, fake_amap, monkeypatch):
     tid = _new_plan(client, monkeypatch, fake_amap=fake_amap)
+    # 第二轮 refine 走 LLM 解析：把 dispatch_agent.build_llm 重打桩为 RefinePlan
+    from app.graph.nodes import dispatch_agent as d
+    from app.graph.nodes.refine_ops import RefinePlan, Operation
+    from tests.conftest import make_fake_build_llm
+    monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
+        structured=RefinePlan(operations=[Operation(op="set_budget", amount=1500)])))
     body = client.post("/api/chat",
                        json={"message": "预算改成1500", "thread_id": tid}).text
     final = _extract(body, "final")

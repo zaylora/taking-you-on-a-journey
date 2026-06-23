@@ -10,20 +10,20 @@ def test_plan_new_always_full_chain():
 
 def test_refine_change_hotel_goes_accommodation():
     s = {"last_intent": "refine_existing",
-         "refine_request": {"op": "change_hotel", "needs_budget_recheck": True}}
+         "refine_request": {"needs_accommodation": True, "needs_budget_recheck": True}}
     assert route_after_plan(s) == "accommodation"
-    assert route_after_accommodation(s) == "budget"   # 换酒店改价 → 仍重算预算
+    assert route_after_accommodation(s) == "budget"
 
 
 def test_refine_cost_change_skips_hotel_but_rechecks_budget():
     s = {"last_intent": "refine_existing",
-         "refine_request": {"op": "relax", "needs_budget_recheck": True}}
+         "refine_request": {"needs_budget_recheck": True}}
     assert route_after_plan(s) == "budget"
 
 
 def test_refine_reorder_skips_both():
     s = {"last_intent": "refine_existing",
-         "refine_request": {"op": "reorder", "needs_budget_recheck": False}}
+         "refine_request": {"needs_budget_recheck": False}}
     assert route_after_plan(s) == "summarize"
 
 

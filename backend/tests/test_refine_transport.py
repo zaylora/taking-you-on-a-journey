@@ -53,7 +53,7 @@ async def test_reorder_rebuilds_transport_segments():
         "query": "第一天顺序调一下",
         "day_plans": [day1],
         "plan_version": 1,
-        "refine_request": {"op": "reorder", "target_day": 1, "needs_budget_recheck": False},
+        "refine_request": {"operations": [{"op": "reorder", "day": 1, "strategy": "reverse"}]},
     }
 
     from app.graph.nodes.refine import refine
@@ -98,7 +98,7 @@ async def test_relax_no_dangling_transport():
         "query": "太赶了，少去一个",
         "day_plans": [day1],
         "plan_version": 1,
-        "refine_request": {"op": "relax", "target_day": 1, "needs_budget_recheck": True},
+        "refine_request": {"operations": [{"op": "set_pace", "day": 1, "direction": "relax"}]},
     }
 
     from app.graph.nodes.refine import refine
@@ -134,7 +134,7 @@ async def test_change_meal_updates_surrounding_transport(fake_amap):
     day1 = _make_day(1, stops)
 
     new_restaurant_name = "新火锅"
-    fake_amap["search_poi"] = [
+    fake_amap["search_around"] = [
         {"name": new_restaurant_name, "poi_id": "NEW_MEAL", "lng": 104.09, "lat": 30.09}
     ]
 
@@ -144,11 +144,8 @@ async def test_change_meal_updates_surrounding_transport(fake_amap):
         "day_plans": [day1],
         "plan_version": 1,
         "refine_request": {
-            "op": "change_meal",
-            "target_day": 1,
-            "needs_search": True,
-            "constraints": {"keywords": "火锅"},
-            "needs_budget_recheck": True,
+            "operations": [{"op": "replace_poi", "day": 1, "kind": "meal", "query": "火锅",
+                            "selector": {"by": "ordinal", "kind": "meal", "index": 0}}]
         },
     }
 

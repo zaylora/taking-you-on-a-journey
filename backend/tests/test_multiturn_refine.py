@@ -57,6 +57,13 @@ def test_second_turn_relaxes_only_target_day(client, fake_amap, monkeypatch):
     ]
     assert sorted(attraction_counts) == [1, 2]   # 3 个景点分到 2 天
 
+    # 第二轮 refine 走 LLM 解析：把 dispatch_agent.build_llm 重打桩为 RefinePlan
+    from app.graph.nodes import dispatch_agent as d
+    from app.graph.nodes.refine_ops import RefinePlan, Operation
+    from tests.conftest import make_fake_build_llm
+    monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
+        structured=RefinePlan(operations=[Operation(op="set_pace", day=2, direction="relax")])))
+
     second = client.post(
         "/api/chat",
         json={"message": "第二天太赶了，少安排一个景点", "thread_id": thread_id},
