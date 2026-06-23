@@ -113,7 +113,7 @@ def _finalize_day(day_plan: dict) -> dict:
     return dp
 
 
-async def _search_insert(state, dp: dict, stops: list[dict], op: dict, replace_idx: int | None) -> str | None:
+async def _search_insert(dp: dict, stops: list[dict], op: dict, replace_idx: int | None) -> str | None:
     """围绕当天 center 检索一个 POI 并插入/替换进 stops。空/失败返回 None。"""
     center = dp.get("center") or {}
     kind = op.get("kind", "attraction")
@@ -127,6 +127,7 @@ async def _search_insert(state, dp: dict, stops: list[dict], op: dict, replace_i
     if not pois:
         return None
     used = {it.get("poi_id") for it in stops}
+    # 候选 poi_id 全部已在当天用过时，回退取首个（尽力而为，不静默失败）
     fresh = next((p for p in pois if p.get("poi_id") not in used), pois[0])
     item = _poi_to_item(fresh, "meal" if kind == "meal" else "attraction")
     if replace_idx is None:
@@ -137,7 +138,10 @@ async def _search_insert(state, dp: dict, stops: list[dict], op: dict, replace_i
 
 
 async def _apply_day_op(state, day_plan: dict, op: dict) -> tuple[dict, bool, str]:
-    """对单天应用一个 op。返回 (更新后的 day_plan(items 为停靠点，未插交通), ok, note)。
+    """对单天应用一个 op。返回 (更新后的 day_plan, ok, note)。
+
+    成功时（ok=True）：items 为纯停靠点（已剥除交通段），由调用方 _finalize_day 收尾重建交通。
+    失败/跳过时（ok=False）：原样返回 day_plan（保留原交通段），调用方不会对其 finalize。
 
     Task 3 接入：reorder / set_pace / remove_poi。
     Task 4 接入：add_poi / replace_poi。Task 5 接入：set_region。
@@ -168,7 +172,7 @@ async def _apply_day_op(state, day_plan: dict, op: dict) -> tuple[dict, bool, st
         return dp, True, f"第{day}天已删除{removed.get('name', '')}"
 
     if kind == "add_poi":
-        note = await _search_insert(state, dp, stops, op, replace_idx=None)
+        note = await _search_insert(dp, stops, op, replace_idx=None)
         if note:
             dp["items"] = stops
             return dp, True, note
@@ -178,7 +182,7 @@ async def _apply_day_op(state, day_plan: dict, op: dict) -> tuple[dict, bool, st
         i = _resolve_selector(stops, op.get("selector"))
         if i is None:
             return dp, False, f"第{day}天未定位到要替换的项"
-        note = await _search_insert(state, dp, stops, op, replace_idx=i)
+        note = await _search_insert(dp, stops, op, replace_idx=i)
         if note:
             dp["items"] = stops
             return dp, True, note

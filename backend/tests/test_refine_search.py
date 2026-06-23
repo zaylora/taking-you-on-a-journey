@@ -42,3 +42,15 @@ async def test_add_poi_empty_search_is_skipped(fake_amap):
     assert out["changed_days"] == []
     assert out["day_plans"] == _plan()
     assert out["refine_notes"]["skipped"]
+
+
+async def test_replace_poi_empty_search_is_skipped(fake_amap):
+    fake_amap["search_around"] = []   # 检索为空
+    state = {"day_plans": _plan(), "plan_version": 1, "city": "成都",
+             "refine_request": {"operations": [
+                 {"op": "replace_poi", "day": 1, "kind": "meal", "query": "火锅",
+                  "selector": {"by": "name", "name": "陈麻婆"}}]}}
+    out = await refine(state)
+    assert out["changed_days"] == []
+    assert out["day_plans"] == _plan()       # 检索失败不破坏行程（含交通段）
+    assert out["refine_notes"]["skipped"]
