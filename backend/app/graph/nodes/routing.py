@@ -11,7 +11,7 @@ def route_after_plan(state: dict) -> str:
     if (state.get("last_intent") or "plan_new") == "plan_new":
         return "accommodation"
     req = state.get("refine_request", {}) or {}
-    if req.get("op") == "change_hotel":
+    if req.get("needs_accommodation"):
         return "accommodation"
     if req.get("needs_budget_recheck"):
         return "budget"

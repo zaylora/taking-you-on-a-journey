@@ -20,6 +20,8 @@ class TripState(TypedDict, total=False):
     refine_request: dict
     plan_version: int
     changed_days: list
+    refine_notes: dict          # refine 本轮 {applied:[...], skipped:[...]}
+    refine_clarification: str   # refine 听不懂时向用户反问的话
 
     # —— 结构化需求（dispatch 标准化产出 + clarify 累积）——
     city: str
