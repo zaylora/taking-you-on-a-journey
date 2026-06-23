@@ -43,6 +43,29 @@ class MatrixCache:
             (poi_a, poi_b, minutes, time.time()))
         self._conn.commit()
 
+    def get_many(self, poi_b: str, src_ids: list[str]) -> dict[str, float]:
+        """批量读「各 src -> poi_b」的有效缓存。一次 SQL，TTL 在内存过滤。"""
+        if not src_ids:
+            return {}
+        placeholders = ",".join("?" * len(src_ids))
+        cur = self._conn.execute(
+            f"SELECT poi_a, minutes, ts FROM distance_cache "
+            f"WHERE poi_b=? AND poi_a IN ({placeholders})",
+            (poi_b, *src_ids))
+        ttl = MATRIX_CACHE_TTL_DAYS * 86400
+        now = time.time()
+        return {a: m for a, m, ts in cur.fetchall() if now - ts <= ttl}
+
+    def put_many(self, rows: list[tuple[str, str, float]]) -> None:
+        """批量写入 (poi_a, poi_b, minutes)。"""
+        if not rows:
+            return
+        now = time.time()
+        self._conn.executemany(
+            "INSERT OR REPLACE INTO distance_cache VALUES (?,?,?,?)",
+            [(a, b, m, now) for a, b, m in rows])
+        self._conn.commit()
+
 
 def _fallback_minutes(a: dict, b: dict) -> float:
     return haversine_km(a, b) / _DRIVE_KMH * 60.0
@@ -55,24 +78,39 @@ def _unstable(poi_id: str) -> bool:
 
 async def distance_matrix(nodes: list[dict], db_path: str) -> list[list[float]]:
     """N*N 真实街道时间矩阵(分钟)。优先缓存 -> 缺失批量调高德 -> 单弧失败降级 haversine。"""
-    cache = MatrixCache(db_path)
+    # 构造里有 connect + CREATE TABLE 等同步 sqlite 调用，一并移出事件循环
+    cache = await asyncio.to_thread(MatrixCache, db_path)
     n = len(nodes)
     mat = [[0.0] * n for _ in range(n)]
     sem = asyncio.Semaphore(MATRIX_CONCURRENCY)
+    # 同步 sqlite 连接非线程安全，串行化所有 DB 段；DB 操作仅微秒级，不损并发收益
+    db_lock = asyncio.Lock()
+
+    async def _cache_get(poi_b: str, src_ids: list[str]) -> dict[str, float]:
+        if not src_ids:
+            return {}
+        async with db_lock:  # to_thread 把同步 sqlite 移出事件循环，避免阻塞
+            return await asyncio.to_thread(cache.get_many, poi_b, src_ids)
+
+    async def _cache_put(rows: list[tuple[str, str, float]]) -> None:
+        if not rows:
+            return
+        async with db_lock:
+            await asyncio.to_thread(cache.put_many, rows)
 
     async def fill_dest(j: int) -> None:
         dest_node = nodes[j]
         dest_id = dest_node["poi_id"]
+        # depot 等 poi_id 不稳定的虚拟节点（坐标随会话变）不读缓存，避免跨会话脏读
+        stable_src = ([nodes[i]["poi_id"] for i in range(n)
+                       if i != j and not _unstable(nodes[i]["poi_id"])]
+                      if not _unstable(dest_id) else [])
+        hits = await _cache_get(dest_id, stable_src)
         missing_idx, missing_orig = [], []
         for i in range(n):
             if i == j:
                 continue
-            # depot 等 poi_id 不稳定的虚拟节点（坐标随会话变）不读缓存，避免跨会话脏读
-            if _unstable(nodes[i]["poi_id"]) or _unstable(dest_id):
-                missing_idx.append(i)
-                missing_orig.append((nodes[i]["lng"], nodes[i]["lat"]))
-                continue
-            cached = cache.get(nodes[i]["poi_id"], dest_id)
+            cached = hits.get(nodes[i]["poi_id"])
             if cached is not None:
                 mat[i][j] = cached
             else:
@@ -83,13 +121,15 @@ async def distance_matrix(nodes: list[dict], db_path: str) -> list[list[float]]:
         async with sem:
             secs = await amap.distance_batch(missing_orig,
                                              (dest_node["lng"], dest_node["lat"]))
+        to_write: list[tuple[str, str, float]] = []
         for k, i in enumerate(missing_idx):
             s = secs[k] if k < len(secs) else None
             minutes = (s / 60.0) if s is not None else _fallback_minutes(nodes[i], dest_node)
             mat[i][j] = minutes
             # 同理：depot 弧不落缓存（坐标会变，缓存会污染下次规划）
             if not (_unstable(nodes[i]["poi_id"]) or _unstable(dest_id)):
-                cache.put(nodes[i]["poi_id"], dest_id, minutes)
+                to_write.append((nodes[i]["poi_id"], dest_id, minutes))
+        await _cache_put(to_write)
 
     await asyncio.gather(*(fill_dest(j) for j in range(n)))
     return mat

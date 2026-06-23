@@ -26,7 +26,7 @@ def reset_plan_new(state):
     return reset_for_plan_new(state)
 
 
-def build_graph(checkpointer=None):
+def _build_state_graph():
     g = StateGraph(TripState)
     for name, fn in [
         ("memory", memory), ("dispatch_agent", dispatch_agent), ("reset_plan_new", reset_plan_new),
@@ -65,4 +65,18 @@ def build_graph(checkpointer=None):
     g.add_edge("answer", "memory_update")
     g.add_edge("summarize", "memory_update")
     g.add_edge("memory_update", END)
-    return g.compile(checkpointer=checkpointer or MemorySaver())
+    return g
+
+
+def build_graph(checkpointer=None):
+    """本地 / 测试入口：默认用 MemorySaver。"""
+    return _build_state_graph().compile(checkpointer=checkpointer or MemorySaver())
+
+
+def make_graph():
+    """LangGraph API/Platform 入口：不传 checkpointer，由平台自动注入持久化。
+
+    平台对单参数工厂会把 RunnableConfig(dict) 当 config 注入，故这里用零参数，
+    且 compile 不带 checkpointer（否则与平台持久化层冲突）。
+    """
+    return _build_state_graph().compile()

@@ -1,6 +1,7 @@
 {
   "dependencies": ["."],
   "graphs": {
-    "trip": "./app/graph/builder.py:build_graph"
-  }
+    "trip": "./app/graph/builder.py:make_graph"
+  },
+  "env": ".env"
 }

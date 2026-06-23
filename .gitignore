@@ -3,6 +3,9 @@
 # ====================
 # Python
 __pycache__/
+
+# LangGraph Studio 本地服务器缓存（langgraph dev 生成）
+.langgraph_api/
 *.py[cod]
 .venv/
 .pytest_cache/
