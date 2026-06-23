@@ -1049,10 +1049,36 @@ git commit -m "feat(m6-v2): 路由按 needs_accommodation 解耦 + 澄清回话 
 - Consumes：Task 3-7 的全部产出
 - Produces：无新接口，仅迁移 + 回归
 
+- [ ] **Step 0: 迁移 test_refine_budget.py 的直接 import（Task 3 删除了 `_relax_until_budget`）**
+
+`test_refine_budget.py` 第 1 行 `from app.graph.nodes.refine import _poi_to_item, _relax_until_budget`：`_poi_to_item` 保留不动；`_relax_until_budget` 已删除，等价替换为 `_relax_stops`（入参/返回均为停靠点列表，不含交通段）。把该文件改为：
+```python
+from app.graph.nodes.refine import _poi_to_item, _relax_stops
+from app.graph.nodes.time_budget import day_used_minutes, DAY_BUDGET
+from app.graph.nodes.itinerary import insert_transport
+
+
+def test_poi_to_item_has_visit_minutes():
+    poi = {"name": "博物馆", "poi_id": "B1", "lng": 113.0, "lat": 23.0, "type": "博物馆"}
+    item = _poi_to_item(poi, "attraction")
+    assert item["visit_minutes"] == 150  # 静态兜底
+
+
+def test_relax_stops_removes_until_fit():
+    # 4 个景点各 120min = 480+交通 > 480 → 删到不超预算
+    stops = [{"type": "attraction", "name": f"p{i}", "poi_id": f"p{i}",
+              "visit_minutes": 120, "location": {"lng": 113.0 + i * 0.01, "lat": 23.0}}
+             for i in range(4)]
+    out = _relax_stops(stops)               # 返回停靠点列表（无交通段）
+    assert day_used_minutes(insert_transport(out)) <= DAY_BUDGET
+    assert len(out) < 4
+```
+Run: `cd backend && uv run pytest tests/test_refine_budget.py -q` → Expected: PASS（2 passed）
+
 - [ ] **Step 1: 审计旧形状用例**
 
-Run: `cd backend && grep -rn '"op":\|refine_request' tests/test_refine_budget.py tests/test_refine_transport.py tests/test_multiturn_refine.py`
-预期：列出所有仍用扁平 `{"op": ...}` 的构造点。对每处按下表等价改写为 operations：
+Run: `cd backend && grep -rn '"op":\|refine_request\|_relax_until_budget\|_reorder_day\|_apply_search_op' tests/test_refine_transport.py tests/test_multiturn_refine.py`
+预期：列出所有仍用扁平 `{"op": ...}` 或已删除 helper 的构造点。对每处按下表等价改写为 operations：
 
 | 旧 | 新 |
 |---|---|
