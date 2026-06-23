@@ -9,8 +9,10 @@ operations 由 dispatch_agent 解析进 state['refine_request']['operations']。
 """
 from copy import deepcopy
 
+from app.core.constants import AROUND_RADIUS_M
 from app.graph.nodes.itinerary import insert_transport, haversine_km
 from app.graph.nodes.time_budget import attraction_minutes, day_used_minutes, DAY_BUDGET
+from app.tools import amap
 
 
 def _resolve_selector(items: list[dict], selector: dict | None) -> int | None:
@@ -111,6 +113,29 @@ def _finalize_day(day_plan: dict) -> dict:
     return dp
 
 
+async def _search_insert(state, dp: dict, stops: list[dict], op: dict, replace_idx: int | None) -> str | None:
+    """围绕当天 center 检索一个 POI 并插入/替换进 stops。空/失败返回 None。"""
+    center = dp.get("center") or {}
+    kind = op.get("kind", "attraction")
+    poi_type = "餐饮" if kind == "meal" else "风景名胜"
+    default_kw = "美食" if kind == "meal" else "热门景点"
+    try:
+        pois = await amap.search_around(center.get("lng", 0.0), center.get("lat", 0.0),
+                                        op.get("query") or default_kw, poi_type, AROUND_RADIUS_M)
+    except Exception:  # noqa: BLE001 —— 检索失败降级，不阻断本轮
+        return None
+    if not pois:
+        return None
+    used = {it.get("poi_id") for it in stops}
+    fresh = next((p for p in pois if p.get("poi_id") not in used), pois[0])
+    item = _poi_to_item(fresh, "meal" if kind == "meal" else "attraction")
+    if replace_idx is None:
+        stops.append(item)
+        return f"第{dp.get('day')}天新增{item['name']}"
+    stops[replace_idx] = item
+    return f"第{dp.get('day')}天已替换为{item['name']}"
+
+
 async def _apply_day_op(state, day_plan: dict, op: dict) -> tuple[dict, bool, str]:
     """对单天应用一个 op。返回 (更新后的 day_plan(items 为停靠点，未插交通), ok, note)。
 
@@ -141,6 +166,23 @@ async def _apply_day_op(state, day_plan: dict, op: dict) -> tuple[dict, bool, st
         removed = stops.pop(i)
         dp["items"] = stops
         return dp, True, f"第{day}天已删除{removed.get('name', '')}"
+
+    if kind == "add_poi":
+        note = await _search_insert(state, dp, stops, op, replace_idx=None)
+        if note:
+            dp["items"] = stops
+            return dp, True, note
+        return dp, False, f"第{day}天未找到合适候选"
+
+    if kind == "replace_poi":
+        i = _resolve_selector(stops, op.get("selector"))
+        if i is None:
+            return dp, False, f"第{day}天未定位到要替换的项"
+        note = await _search_insert(state, dp, stops, op, replace_idx=i)
+        if note:
+            dp["items"] = stops
+            return dp, True, note
+        return dp, False, f"第{day}天未找到替换候选"
 
     return dp, False, f"暂不支持的操作：{kind}"
 
