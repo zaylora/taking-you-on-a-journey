@@ -21,7 +21,7 @@ class Operation(BaseModel):
     op: Literal[
         "set_region", "add_poi", "remove_poi", "replace_poi",
         "reorder", "set_pace", "set_budget", "set_hotel",
-    ]
+    ] = Field(description="原子操作类型；决定本条其余字段的语义")
     day: int | None = Field(default=None, description="目标天（从 1 开始）；全局操作可为空")
     area: str = Field(default="", description="set_region：新区域地名，如「黄埔」")
     query: str = Field(default="", description="add_poi/replace_poi/set_region：检索关键词")
