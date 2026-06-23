@@ -20,6 +20,7 @@ def _plan():
 def test_find_day():
     assert _find_day(_plan(), 2) == 1
     assert _find_day(_plan(), 9) is None
+    assert _find_day(_plan(), None) is None
 
 
 def test_finalize_day_inserts_transport_and_center():
@@ -105,3 +106,13 @@ async def test_compound_reorder_then_remove_applied_in_order():
     assert stops == ["金沙遗址"]
     assert out["changed_days"] == [2]
     assert len(out["refine_notes"]["applied"]) == 2
+
+
+async def test_empty_operations_no_changes():
+    state = {"day_plans": _plan(), "plan_version": 1, "refine_request": {"operations": []}}
+    out = await refine(state)
+    assert out["changed_days"] == []
+    assert out["plan_version"] == 1
+    assert out["day_plans"] == _plan()
+    assert out["refine_request"]["needs_budget_recheck"] is False
+    assert out["refine_request"]["needs_accommodation"] is False

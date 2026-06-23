@@ -8,21 +8,9 @@ operations 由 dispatch_agent 解析进 state['refine_request']['operations']。
 待接（Task 5）：set_region
 """
 from copy import deepcopy
-from typing import Literal
-
-from pydantic import BaseModel, Field
 
 from app.graph.nodes.itinerary import insert_transport, haversine_km
 from app.graph.nodes.time_budget import attraction_minutes, day_used_minutes, DAY_BUDGET
-
-
-class RefineRequest(BaseModel):
-    op: Literal["add", "remove", "replace", "relax", "tighten", "change_budget", "change_hotel", "change_meal", "reorder"]
-    target_day: int | None = None
-    target_item_name: str | None = None
-    constraints: dict = Field(default_factory=dict)
-    needs_search: bool = False
-    needs_budget_recheck: bool = True
 
 
 def _resolve_selector(items: list[dict], selector: dict | None) -> int | None:
@@ -180,6 +168,7 @@ async def refine(state, config=None) -> dict:
             continue
         if kind == "set_hotel":
             days = op.get("days") or _overnight_days(day_plans)
+            # items 不变，但过夜日计入 changed，使 plan_version 推进，表示「方案版本前进、待 accommodation 节点重排住宿」
             needs_accom = True
             for d in days:
                 changed.add(d)
