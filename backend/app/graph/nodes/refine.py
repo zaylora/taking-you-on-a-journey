@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.graph.nodes.itinerary import insert_transport, build_day_stops, haversine_km
+from app.graph.nodes.itinerary import insert_transport, haversine_km
 from app.graph.nodes.time_budget import attraction_minutes, day_used_minutes, DAY_BUDGET
 from app.tools import amap
 
