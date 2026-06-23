@@ -26,3 +26,11 @@ async def test_answer_returns_clarification_verbatim_without_llm(monkeypatch):
     out = await answer({"refine_clarification": "你想把第几天换到哪里？"}, None)
     assert out["summary"] == "你想把第几天换到哪里？"
     assert out["changed_days"] == []
+
+
+def test_route_after_accommodation_unchanged():
+    # refine_existing：按 needs_budget_recheck 决定 budget / summarize
+    assert route_after_accommodation(
+        {"last_intent": "refine_existing", "refine_request": {"needs_budget_recheck": True}}) == "budget"
+    assert route_after_accommodation(
+        {"last_intent": "refine_existing", "refine_request": {"needs_budget_recheck": False}}) == "summarize"

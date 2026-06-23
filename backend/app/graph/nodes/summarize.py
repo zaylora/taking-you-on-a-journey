@@ -12,8 +12,9 @@ async def summarize(state: dict, config: RunnableConfig) -> dict:
     day_plans = state.get("day_plans") or []
     if day_plans:
         notes = state.get("refine_notes") or {}
-        extra = f"\n本轮修改记录（applied/skipped）：{notes}" if notes else ""
-        user = f"请根据以下结构化逐日行程，写成中文攻略：\n{day_plans}{extra}\n若有 skipped 项，请如实简述未能完成的部分。"
+        extra = (f"\n本轮修改记录（applied/skipped）：{notes}"
+                 f"\n若有 skipped 项，请如实简述未能完成的部分。") if notes else ""
+        user = f"请根据以下结构化逐日行程，写成中文攻略：\n{day_plans}{extra}"
     else:
         user = f"请根据用户需求给出中文旅行建议：{state.get('query', '')}"
     parts: list[str] = []
