@@ -1,11 +1,11 @@
-"""M5 fix refine：async 局部重排，只改 target_day，绝不回全量 itinerary。
+"""M6 refine：序列循环执行器，无检索 handler，诚实回报。
 
-op 由 dispatch_agent 用规则解析进 state['refine_request']。本节点按 op 在旧 day_plans 上增量改：
-- relax/remove/tighten：删/压缩 target_day 的项。
-- reorder：target_day 内 items 倒序（确定性局部调序）。
-- change_budget：更新预算上限（day_plans 不变，交 budget 核算）。
-- change_hotel：items 不动，标记过夜日交 accommodation 重排。
-- change_meal/add/replace：补检索后局部插入/替换（见 Task 5）。
+operations 由 dispatch_agent 解析进 state['refine_request']['operations']。
+本节点按序在 day_plans 工作副本上应用一串 ops，统一收尾后返回。
+
+支持（Task 3）：reorder / set_pace / remove_poi / set_budget / set_hotel
+待接（Task 4）：add_poi / replace_poi
+待接（Task 5）：set_region
 """
 from copy import deepcopy
 from typing import Literal
@@ -14,7 +14,6 @@ from pydantic import BaseModel, Field
 
 from app.graph.nodes.itinerary import insert_transport, haversine_km
 from app.graph.nodes.time_budget import attraction_minutes, day_used_minutes, DAY_BUDGET
-from app.tools import amap
 
 
 class RefineRequest(BaseModel):
@@ -24,30 +23,6 @@ class RefineRequest(BaseModel):
     constraints: dict = Field(default_factory=dict)
     needs_search: bool = False
     needs_budget_recheck: bool = True
-
-
-def _rebuild_transport(day_plan: dict) -> dict:
-    """剥掉旧交通段、按当前停靠点顺序重派生（M6 不变量：每对相邻停靠点一段）。"""
-    updated = dict(day_plan)
-    stops = [it for it in (updated.get("items") or []) if it.get("type") != "transport"]
-    updated["items"] = insert_transport(stops)
-    return updated
-
-
-def _infer_op(query: str) -> str:
-    if "预算" in query:
-        return "change_budget"
-    if "酒店" in query or "住宿" in query:
-        return "change_hotel"
-    if any(k in query for k in ("晚餐", "午餐", "餐厅", "吃", "饭")) and "换" in query:
-        return "change_meal"
-    if any(k in query for k in ("少", "删", "太赶", "轻松")):
-        return "relax"
-    if "换" in query:
-        return "replace"
-    if "加" in query:
-        return "add"
-    return "reorder"
 
 
 def _resolve_selector(items: list[dict], selector: dict | None) -> int | None:
@@ -120,41 +95,6 @@ def _find_day(day_plans: list, target_day: int | None) -> int | None:
     return None
 
 
-def _relax_day(day_plan: dict) -> dict:
-    updated = dict(day_plan)
-    items = list(updated.get("items", []) or [])
-    removable = [i for i, it in enumerate(items)
-                 if it.get("type") in ("attraction", "meal") and it.get("name")]
-    if removable:
-        items.pop(removable[-1])
-    updated["items"] = items
-    return updated
-
-
-def _relax_until_budget(day_plan: dict) -> dict:
-    """反复删当天最后一个景点/餐饮，直到 day_used_minutes <= DAY_BUDGET（至少删 1 个）。"""
-    updated = dict(day_plan)
-    items = [it for it in (updated.get("items") or []) if it.get("type") != "transport"]
-    removed = False
-    while items and (day_used_minutes(insert_transport(items)) > DAY_BUDGET or not removed):
-        removable = [i for i, it in enumerate(items)
-                     if it.get("type") in ("attraction", "meal") and it.get("name")]
-        if not removable:
-            break
-        items.pop(removable[-1])
-        removed = True
-        if day_used_minutes(insert_transport(items)) <= DAY_BUDGET:
-            break
-    updated["items"] = insert_transport(items)
-    return updated
-
-
-def _reorder_day(day_plan: dict) -> dict:
-    updated = dict(day_plan)
-    updated["items"] = list(reversed(updated.get("items", []) or []))
-    return updated
-
-
 def _poi_to_item(poi: dict, type_: str) -> dict:
     """高德 POI → PlanItem dict（与 itinerary.PlanItem 字段对齐）。"""
     item = {
@@ -169,98 +109,114 @@ def _poi_to_item(poi: dict, type_: str) -> dict:
     return item
 
 
-def _set_meal(day_plan: dict, new_item: dict) -> dict:
-    """替换当天第一个 meal 项；没有则追加。"""
-    updated = dict(day_plan)
-    items = list(updated.get("items", []) or [])
-    for i, it in enumerate(items):
-        if it.get("type") == "meal":
-            items[i] = new_item
-            break
-    else:
-        items.append(new_item)
-    updated["items"] = items
-    return updated
-
-
-def _add_or_replace_attraction(day_plan: dict, new_item: dict, replace: bool) -> dict:
-    updated = dict(day_plan)
-    items = list(updated.get("items", []) or [])
-    if replace:
-        for i, it in enumerate(items):
-            if it.get("type") == "attraction":
-                items[i] = new_item
-                break
-        else:
-            items.append(new_item)
-    else:
-        items.append(new_item)
-    updated["items"] = items
-    return updated
-
-
 def _overnight_days(day_plans: list) -> list:
     days = sorted(d.get("day", 0) for d in day_plans)
     return days[:-1] if len(days) > 1 else days
 
 
+def _finalize_day(day_plan: dict) -> dict:
+    """收尾：剥掉旧交通段、按当前停靠点重插交通、重算 center。"""
+    dp = dict(day_plan)
+    stops = [it for it in (dp.get("items") or []) if it.get("type") != "transport"]
+    dp["items"] = insert_transport(stops)
+    dp["center"] = _recompute_center(stops)
+    return dp
+
+
+async def _apply_day_op(state, day_plan: dict, op: dict) -> tuple[dict, bool, str]:
+    """对单天应用一个 op。返回 (更新后的 day_plan(items 为停靠点，未插交通), ok, note)。
+
+    Task 3 接入：reorder / set_pace / remove_poi。
+    Task 4 接入：add_poi / replace_poi。Task 5 接入：set_region。
+    """
+    kind = op.get("op")
+    dp = dict(day_plan)
+    stops = [it for it in (dp.get("items") or []) if it.get("type") != "transport"]
+    day = dp.get("day")
+
+    if kind == "reorder":
+        strat = op.get("strategy", "optimize")
+        dp["items"] = list(reversed(stops)) if strat == "reverse" else _optimize_stops(stops)
+        return dp, True, f"第{day}天顺序已调整"
+
+    if kind == "set_pace":
+        new_stops = _relax_stops(stops)
+        dp["items"] = new_stops
+        if len(new_stops) == len(stops):
+            return dp, False, f"第{day}天已无可删减项"
+        return dp, True, f"第{day}天已精简{len(stops) - len(new_stops)}项"
+
+    if kind == "remove_poi":
+        i = _resolve_selector(stops, op.get("selector"))
+        if i is None:
+            return dp, False, f"第{day}天未定位到要删除的项"
+        removed = stops.pop(i)
+        dp["items"] = stops
+        return dp, True, f"第{day}天已删除{removed.get('name', '')}"
+
+    return dp, False, f"暂不支持的操作：{kind}"
+
+
 async def refine(state, config=None) -> dict:
-    query = state.get("query", "")
     day_plans = deepcopy(state.get("day_plans", []) or [])
     request = dict(state.get("refine_request", {}) or {})
-    op = request.get("op") or _infer_op(query)
-    target_day = request.get("target_day")
-    constraints = request.get("constraints", {}) or {}
-    idx = _find_day(day_plans, target_day)
-    changed_days: list[int] = []
-    extra: dict = {}
+    operations = list(request.get("operations") or [])
+    applied: list[str] = []
+    skipped: list[str] = []
+    changed: set[int] = set()
+    touched: set[int] = set()
+    needs_accom = False
+    budget_new = None
 
-    if op == "relax" and idx is not None:
-        day_plans[idx] = _relax_until_budget(day_plans[idx])
-        changed_days = [target_day]
-    elif op in ("remove", "tighten") and idx is not None:
-        day_plans[idx] = _rebuild_transport(_relax_day(day_plans[idx]))
-        changed_days = [target_day]
-    elif op == "reorder" and idx is not None:
-        day_plans[idx] = _rebuild_transport(_reorder_day(day_plans[idx]))
-        changed_days = [target_day]
-    elif op == "change_budget":
-        new_budget = constraints.get("budget")
-        if new_budget is not None:
-            extra["budget"] = float(new_budget)
-    elif op == "change_hotel":
-        changed_days = _overnight_days(day_plans)  # items 不动，accommodation 重排 hotel
-    elif op in ("change_meal", "replace", "add") and idx is not None:
-        changed_days = await _apply_search_op(state, day_plans, idx, op, constraints)
+    for op in operations:
+        kind = op.get("op")
+        if kind == "set_budget":
+            amt = op.get("amount")
+            if amt is None:
+                skipped.append("预算调整缺少金额，已跳过")
+                continue
+            budget_new = float(amt)
+            applied.append(f"预算改为 {budget_new:.0f}")
+            continue
+        if kind == "set_hotel":
+            days = op.get("days") or _overnight_days(day_plans)
+            needs_accom = True
+            for d in days:
+                changed.add(d)
+            applied.append("酒店偏好已更新，将重排住宿")
+            continue
+        # 按天操作
+        day = op.get("day")
+        idx = _find_day(day_plans, day)
+        if idx is None:
+            skipped.append(f"第{day}天未找到，已跳过")
+            continue
+        dp, ok, note = await _apply_day_op(state, day_plans[idx], op)
+        day_plans[idx] = dp
+        if ok:
+            applied.append(note)
+            changed.add(day)
+            touched.add(day)
+        else:
+            skipped.append(note)
 
-    plan_version = (state.get("plan_version", 0) or 0) + (1 if changed_days else 0)
-    return {
-        **extra,
+    # 每个被结构修改的天：统一重建交通 + 重算 center（一次）
+    for d in touched:
+        i = _find_day(day_plans, d)
+        if i is not None:
+            day_plans[i] = _finalize_day(day_plans[i])
+
+    needs_budget = any(o.get("op") != "reorder" for o in operations)
+    plan_version = (state.get("plan_version", 0) or 0) + (1 if changed else 0)
+    out: dict = {
         "day_plans": day_plans,
-        "refine_request": {**request, "op": op, "target_day": target_day,
-                           "needs_budget_recheck": request.get("needs_budget_recheck", True)},
-        "changed_days": changed_days,
+        "refine_request": {**request,
+                           "needs_budget_recheck": needs_budget,
+                           "needs_accommodation": needs_accom},
+        "changed_days": sorted(changed),
         "plan_version": plan_version,
+        "refine_notes": {"applied": applied, "skipped": skipped},
     }
-
-
-async def _apply_search_op(state, day_plans, idx, op, constraints) -> list:
-    """补检索后局部插入/替换受影响天。失败/空 → 降级不改，返回 []。"""
-    city = state.get("city", "")
-    keywords = (constraints or {}).get("keywords")
-    target_day = day_plans[idx].get("day")
-    try:
-        if op == "change_meal":
-            pois = await amap.search_poi(city, keywords or "美食", "餐饮")
-            if not pois:
-                return []
-            day_plans[idx] = _rebuild_transport(_set_meal(day_plans[idx], _poi_to_item(pois[0], "meal")))
-        else:  # add / replace 景点
-            pois = await amap.search_poi(city, keywords or "热门景点", "风景名胜")
-            if not pois:
-                return []
-            item = _poi_to_item(pois[0], "attraction")
-            day_plans[idx] = _rebuild_transport(_add_or_replace_attraction(day_plans[idx], item, replace=(op == "replace")))
-    except Exception:  # noqa: BLE001 —— 检索失败降级，不阻断本轮
-        return []
-    return [target_day]
+    if budget_new is not None:
+        out["budget"] = budget_new
+    return out
