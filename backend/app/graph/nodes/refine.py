@@ -12,7 +12,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from app.graph.nodes.itinerary import insert_transport
+from app.graph.nodes.itinerary import insert_transport, build_day_stops, haversine_km
 from app.graph.nodes.time_budget import attraction_minutes, day_used_minutes, DAY_BUDGET
 from app.tools import amap
 
@@ -48,6 +48,67 @@ def _infer_op(query: str) -> str:
     if "加" in query:
         return "add"
     return "reorder"
+
+
+def _resolve_selector(items: list[dict], selector: dict | None) -> int | None:
+    """按 selector 在 items 里定位一个停靠点的下标；命不中返回 None。"""
+    sel = selector or {}
+    if sel.get("by", "name") == "name":
+        name = (sel.get("name") or "").strip()
+        if not name:
+            return None
+        for i, it in enumerate(items):
+            if it.get("type") != "transport" and name in (it.get("name") or ""):
+                return i
+        return None
+    kind = sel.get("kind", "attraction")
+    idxs = [i for i, it in enumerate(items) if it.get("type") == kind]
+    if not idxs:
+        return None
+    try:
+        return idxs[sel.get("index", -1)]
+    except IndexError:
+        return None
+
+
+def _recompute_center(stops: list[dict]) -> dict:
+    """当天 center = 非交通停靠点坐标均值。"""
+    pts = [it.get("location") or {} for it in stops if it.get("type") != "transport"]
+    pts = [p for p in pts if p]
+    if not pts:
+        return {"lng": 0.0, "lat": 0.0}
+    return {"lng": sum(p.get("lng", 0.0) for p in pts) / len(pts),
+            "lat": sum(p.get("lat", 0.0) for p in pts) / len(pts)}
+
+
+def _optimize_stops(stops: list[dict]) -> list[dict]:
+    """从首个停靠点起，贪心最近邻重排（按 location 直线距离）。"""
+    if len(stops) < 3:
+        return list(stops)
+    remaining = list(stops)
+    order = [remaining.pop(0)]
+    while remaining:
+        last = order[-1].get("location") or {}
+        j = min(range(len(remaining)),
+                key=lambda i: haversine_km(remaining[i].get("location") or {}, last))
+        order.append(remaining.pop(j))
+    return order
+
+
+def _relax_stops(stops: list[dict]) -> list[dict]:
+    """反复删当天最后一个景点/餐饮，直到 day_used_minutes <= DAY_BUDGET（至少删 1 个）。"""
+    items = list(stops)
+    removed = False
+    while items and (day_used_minutes(insert_transport(items)) > DAY_BUDGET or not removed):
+        removable = [i for i, it in enumerate(items)
+                     if it.get("type") in ("attraction", "meal") and it.get("name")]
+        if not removable:
+            break
+        items.pop(removable[-1])
+        removed = True
+        if day_used_minutes(insert_transport(items)) <= DAY_BUDGET:
+            break
+    return items
 
 
 def _find_day(day_plans: list, target_day: int | None) -> int | None:
