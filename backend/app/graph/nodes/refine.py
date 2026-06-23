@@ -10,7 +10,7 @@ operations 由 dispatch_agent 解析进 state['refine_request']['operations']。
 from copy import deepcopy
 
 from app.core.constants import AROUND_RADIUS_M
-from app.graph.nodes.itinerary import insert_transport, haversine_km
+from app.graph.nodes.itinerary import insert_transport, build_day_stops, haversine_km
 from app.graph.nodes.time_budget import attraction_minutes, day_used_minutes, DAY_BUDGET
 from app.tools import amap
 
@@ -137,6 +137,33 @@ async def _search_insert(dp: dict, stops: list[dict], op: dict, replace_idx: int
     return f"第{dp.get('day')}天已替换为{item['name']}"
 
 
+async def _set_region(state, dp: dict, op: dict) -> tuple[dict, bool, str]:
+    """换区域：geocode 新坐标 → 围绕新 center 检索景点池+餐饮池 → build_day_stops 重排当天。
+    沿用原景点数量。center 由 _finalize_day 按新停靠点重算。"""
+    area = (op.get("area") or "").strip()
+    day = dp.get("day")
+    if not area:
+        return dp, False, f"第{day}天换区域缺少地名"
+    try:
+        loc = await amap.geocode(f"{state.get('city', '')}{area}")
+    except Exception:  # noqa: BLE001
+        loc = {}
+    if not loc:
+        return dp, False, f"未能定位「{area}」"
+    lng, lat = loc.get("lng", 0.0), loc.get("lat", 0.0)
+    prev_n = max(1, len([it for it in (dp.get("items") or []) if it.get("type") == "attraction"]))
+    food_kw = (state.get("preferences") or {}).get("food") or "美食"
+    try:
+        attr_pool = await amap.search_around(lng, lat, op.get("query") or "热门景点", "风景名胜", AROUND_RADIUS_M)
+        rest_pool = await amap.search_around(lng, lat, food_kw, "餐饮", AROUND_RADIUS_M)
+    except Exception:  # noqa: BLE001
+        return dp, False, f"「{area}」附近检索失败"
+    if not attr_pool:
+        return dp, False, f"「{area}」附近未找到景点"
+    dp["items"] = build_day_stops(attr_pool[:prev_n], rest_pool or [])
+    return dp, True, f"第{day}天已迁至{area}（重排{len(dp['items'])}项）"
+
+
 async def _apply_day_op(state, day_plan: dict, op: dict) -> tuple[dict, bool, str]:
     """对单天应用一个 op。返回 (更新后的 day_plan, ok, note)。
 
@@ -187,6 +214,9 @@ async def _apply_day_op(state, day_plan: dict, op: dict) -> tuple[dict, bool, st
             dp["items"] = stops
             return dp, True, note
         return dp, False, f"第{day}天未找到替换候选"
+
+    if kind == "set_region":
+        return await _set_region(state, dp, op)
 
     return dp, False, f"暂不支持的操作：{kind}"
 
