@@ -2,11 +2,10 @@
 
 合并原 intent（判意图）+ dispatch（plan_new 标准化）。三类意图：
 - plan_new：规则/LLM 判定后，用 NormalizedReq 标准化需求并写顶层字段。
-- refine_existing：用规则解析出结构化 RefineRequest（op/target_day/constraints/标志），不调 LLM。
+- refine_existing：调 LLM 结构化输出（RefinePlan）解析成可组合原子操作 operations；无法解析时产出 clarification 反问。
 - qa：只写 last_intent，交给 answer 节点。
 clarify 在本节点之后、仅 plan_new 经过；clarify 自己把澄清答案并回 normalized_req。
 """
-import re
 from typing import Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -14,6 +13,7 @@ from langchain_core.runnables import RunnableConfig
 from pydantic import BaseModel, Field
 
 from app.graph.nodes.dispatch import NormalizedReq, _SYS as _DISPATCH_SYS
+from app.graph.nodes.refine_ops import RefinePlan
 
 from app.llm.factory import build_llm
 
@@ -61,50 +61,39 @@ def _rule_based_intent(query: str, has_plan: bool) -> IntentResult | None:
     return None
 
 
-def _refine_flags(op: str) -> dict:
-    """op -> 是否需补检索 / 是否需重算预算。确定性映射（见计划 Global Constraints 表）。"""
-    needs_search = op in ("change_meal", "add", "replace")
-    needs_budget_recheck = op != "reorder"
-    return {"needs_search": needs_search, "needs_budget_recheck": needs_budget_recheck}
+_REFINE_SYS = (
+    "你是行程修改解析器。把用户对【已有行程】的修改诉求，解析成有序的原子操作列表。"
+    "可用操作：set_region(换某天到新区域 area)、add_poi(加景点/餐 query+kind)、"
+    "remove_poi(删项 selector)、replace_poi(换项 selector+query+kind)、"
+    "reorder(调顺序 strategy)、set_pace(轻松/紧凑 direction)、set_budget(改预算 amount)、"
+    "set_hotel(换酒店 criteria)。复合诉求拆成多个操作并按语序排列。"
+    "day 必须依据所给 day_plans 判定（从 1 开始）。selector 可按 name 或 ordinal(kind+index,-1=最后)。"
+    "若完全无法理解要改什么，operations 留空并在 clarification 用一句中文反问。"
+)
 
 
-def _infer_op(query: str) -> str:
-    if "预算" in query:
-        return "change_budget"
-    if "酒店" in query or "住宿" in query:
-        return "change_hotel"
-    if any(k in query for k in ("晚餐", "午餐", "餐厅", "吃", "饭")) and "换" in query:
-        return "change_meal"
-    if any(k in query for k in ("少", "删", "太赶", "轻松")):
-        return "relax"
-    if "换" in query:
-        return "replace"
-    if "加" in query:
-        return "add"
-    return "reorder"
+def _day_plans_digest(day_plans: list) -> list:
+    """压缩 day_plans 给 LLM 看结构（天号 + 各项类型与名称），不下发坐标等噪声。"""
+    digest = []
+    for d in day_plans or []:
+        items = [{"type": it.get("type"), "name": it.get("name", "")}
+                 for it in (d.get("items") or []) if it.get("type") != "transport"]
+        digest.append({"day": d.get("day"), "items": items})
+    return digest
 
 
-def _parse_refine(query: str, target_day: int | None) -> dict:
-    """纯规则把自然语言修改解析成结构化 RefineRequest dict。不调 LLM。"""
-    op = _infer_op(query)
-    constraints: dict = {}
-    # "换成X"/"改成X" 的 X 作为检索关键词或目标项
-    m = re.search(r"(?:换成|改成|换个|改为)\s*([一-龥A-Za-z0-9]{1,12})", query)
-    if m:
-        constraints["keywords"] = m.group(1)
-    if op == "change_budget":
-        num = re.search(r"(\d{3,6})", query)
-        if num:
-            constraints["budget"] = float(num.group(1))
-    flags = _refine_flags(op)
-    return {
-        "op": op,
-        "target_day": target_day,
-        "target_item_name": constraints.get("keywords", "") if op in ("replace", "change_meal") else "",
-        "constraints": constraints,
-        "needs_search": flags["needs_search"],
-        "needs_budget_recheck": flags["needs_budget_recheck"],
-    }
+async def _parse_refine_llm(state: dict, query: str, target_day, config) -> RefinePlan:
+    llm = build_llm(temperature=0).with_structured_output(RefinePlan, method="function_calling")
+    return await llm.ainvoke([
+        SystemMessage(content=_REFINE_SYS),
+        HumanMessage(content=str({
+            "query": query,
+            "target_day_hint": target_day,
+            "day_plans": _day_plans_digest(state.get("day_plans") or []),
+            "city": state.get("city", ""),
+            "conversation_summary": state.get("conversation_summary", ""),
+        })),
+    ], config=config)
 
 
 async def dispatch_agent(state: dict, config: RunnableConfig) -> dict:
@@ -129,9 +118,15 @@ async def dispatch_agent(state: dict, config: RunnableConfig) -> dict:
         return {"last_intent": "qa"}
 
     if result.intent == "refine_existing":
+        plan = await _parse_refine_llm(state, query, result.target_day, config)
+        if not plan.operations and plan.clarification:
+            return {"last_intent": "qa", "refine_clarification": plan.clarification}
         return {
             "last_intent": "refine_existing",
-            "refine_request": _parse_refine(query, result.target_day),
+            "refine_request": {
+                "operations": [o.model_dump() for o in plan.operations],
+                "clarification": plan.clarification,
+            },
         }
 
     # plan_new：标准化需求（LLM），写顶层字段供检索消费

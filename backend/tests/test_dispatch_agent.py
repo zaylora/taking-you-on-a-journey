@@ -1,32 +1,11 @@
 import pytest
 
 from app.graph.nodes.dispatch_agent import (
-    dispatch_agent, route_after_dispatch, reset_for_plan_new,
-    _parse_refine, _refine_flags, IntentResult,
+    dispatch_agent, route_after_dispatch, reset_for_plan_new, IntentResult,
 )
 from app.graph.nodes.dispatch import NormalizedReq
+from app.graph.nodes.refine_ops import RefinePlan, Operation
 from tests.conftest import make_fake_build_llm
-
-
-def test_refine_flags_by_op():
-    assert _refine_flags("reorder") == {"needs_search": False, "needs_budget_recheck": False}
-    assert _refine_flags("change_meal") == {"needs_search": True, "needs_budget_recheck": True}
-    assert _refine_flags("relax") == {"needs_search": False, "needs_budget_recheck": True}
-    assert _refine_flags("change_hotel") == {"needs_search": False, "needs_budget_recheck": True}
-
-
-def test_parse_refine_extracts_op_day_and_flags():
-    r = _parse_refine("第二天太赶了，少安排一个景点", target_day=2)
-    assert r["op"] == "relax" and r["target_day"] == 2
-    assert r["needs_search"] is False and r["needs_budget_recheck"] is True
-
-    r2 = _parse_refine("把第一天晚餐换成火锅", target_day=1)
-    assert r2["op"] == "change_meal" and r2["needs_search"] is True
-    assert r2["constraints"].get("keywords") == "火锅"
-
-    r3 = _parse_refine("预算改成3000", target_day=None)
-    assert r3["op"] == "change_budget" and r3["constraints"].get("budget") == 3000.0
-    assert r3["needs_search"] is False
 
 
 def test_route_after_dispatch_maps_intent():
@@ -54,20 +33,6 @@ async def test_first_turn_is_plan_new_and_normalizes(monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_refine_turn_parses_by_rule_without_llm(monkeypatch):
-    # 已有 day_plans + "第二天少一个" → 规则判 refine_existing 且规则解析 op，不调任何 LLM
-    def _boom(*_a, **_k):
-        raise AssertionError("refine 解析不应调用 LLM")
-    monkeypatch.setattr("app.graph.nodes.dispatch_agent.build_llm", _boom)
-    out = await dispatch_agent(
-        {"query": "第二天太赶了，少安排一个景点", "day_plans": [{"day": 1}, {"day": 2}]}, None)
-    assert out["last_intent"] == "refine_existing"
-    assert out["refine_request"]["op"] == "relax"
-    assert out["refine_request"]["target_day"] == 2
-    assert out["refine_request"]["needs_budget_recheck"] is True
-
-
-@pytest.mark.asyncio
 async def test_qa_turn_only_sets_intent(monkeypatch):
     def _boom(*_a, **_k):
         raise AssertionError("qa 不应调用 LLM")
@@ -76,3 +41,27 @@ async def test_qa_turn_only_sets_intent(monkeypatch):
         {"query": "刚才那个行程适合带老人吗？", "day_plans": [{"day": 1}]}, None)
     assert out["last_intent"] == "qa"
     assert "normalized_req" not in out and "refine_request" not in out
+
+
+@pytest.mark.asyncio
+async def test_refine_turn_parses_to_operations_via_llm(monkeypatch):
+    plan = RefinePlan(operations=[Operation(op="set_region", day=1, area="黄埔")])
+    monkeypatch.setattr("app.graph.nodes.dispatch_agent.build_llm",
+                        make_fake_build_llm(structured=plan))
+    out = await dispatch_agent(
+        {"query": "把第一天改成黄埔", "day_plans": [{"day": 1, "items": []}]}, None)
+    assert out["last_intent"] == "refine_existing"
+    ops = out["refine_request"]["operations"]
+    assert ops[0]["op"] == "set_region" and ops[0]["area"] == "黄埔" and ops[0]["day"] == 1
+
+
+@pytest.mark.asyncio
+async def test_refine_no_ops_with_clarification_routes_to_qa(monkeypatch):
+    plan = RefinePlan(operations=[], clarification="你想把第几天换到哪里？")
+    monkeypatch.setattr("app.graph.nodes.dispatch_agent.build_llm",
+                        make_fake_build_llm(structured=plan))
+    out = await dispatch_agent(
+        {"query": "改一下那个", "day_plans": [{"day": 1, "items": []}]}, None)
+    assert out["last_intent"] == "qa"
+    assert out["refine_clarification"].startswith("你想")
+    assert "refine_request" not in out
