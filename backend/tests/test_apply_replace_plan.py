@@ -4,7 +4,6 @@
 直接让 build_llm 抛异常，走降级返回 skeleton，无需构造合法 DayPlans。
 """
 import pytest
-from langchain_core.messages import AIMessage
 
 
 @pytest.fixture(autouse=True)
