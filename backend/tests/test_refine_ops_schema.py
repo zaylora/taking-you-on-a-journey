@@ -39,3 +39,21 @@ def test_refine_plan_empty_with_clarification():
 def test_unknown_op_rejected():
     with pytest.raises(ValidationError):
         Operation(op="teleport", day=1)
+
+
+def test_operation_replace_plan_carries_requirements_patch():
+    op = Operation(op="replace_plan", requirements_patch={"city": "广州", "days": 3})
+    assert op.op == "replace_plan"
+    assert op.requirements_patch == {"city": "广州", "days": 3}
+    assert op.question == ""
+
+
+def test_operation_answer_only_carries_question():
+    op = Operation(op="answer_only", question="为什么第二天这么赶？")
+    assert op.op == "answer_only" and op.question == "为什么第二天这么赶？"
+    assert op.requirements_patch == {}
+
+
+def test_operation_defaults_for_new_fields():
+    op = Operation(op="reorder", day=1)
+    assert op.requirements_patch == {} and op.question == ""

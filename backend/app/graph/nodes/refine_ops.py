@@ -19,8 +19,10 @@ class Selector(BaseModel):
 
 class Operation(BaseModel):
     op: Literal[
+        "replace_plan",      # 全量（重）规划，需求经 requirements_patch 承载
         "set_region", "add_poi", "remove_poi", "replace_poi",
         "reorder", "set_pace", "set_budget", "set_hotel",
+        "answer_only",       # 不改计划，纯问答
     ] = Field(description="原子操作类型；决定本条其余字段的语义")
     day: int | None = Field(default=None, description="目标天（从 1 开始）；全局操作可为空")
     area: str = Field(default="", description="set_region：新区域地名，如「黄埔」")
@@ -32,6 +34,8 @@ class Operation(BaseModel):
     amount: float | None = Field(default=None, description="set_budget：新预算上限(元)")
     days: list[int] | None = Field(default=None, description="set_hotel：目标过夜日；空=全部过夜日")
     criteria: str = Field(default="", description="set_hotel：偏好描述，如「离地铁近」")
+    requirements_patch: dict = Field(default_factory=dict, description="replace_plan：city/days/budget/preferences 等需求补丁")
+    question: str = Field(default="", description="answer_only：用户的问题原文")
 
 
 class RefinePlan(BaseModel):
