@@ -101,7 +101,7 @@ def test_reorder_skips_accommodation_and_budget(client, fake_amap, monkeypatch):
     body = client.post("/api/chat",
                        json={"message": "第一天顺序调整一下", "thread_id": tid}).text
     patch = _extract(body, "plan_patch")
-    assert patch["changed_days"] == [1]             # 走到 summarize，未碰 accommodation/budget
+    assert patch["changed_days"] == [1]             # 走到 render，未碰 accommodation/budget
 
 
 def test_change_budget_updates_limit(client, fake_amap, monkeypatch):

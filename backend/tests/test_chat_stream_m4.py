@@ -73,3 +73,6 @@ def test_over_budget_retries_then_caps(client, fake_amap, monkeypatch):
     # 新链路：6节点直线图无超支回退循环，apply 只调一次 compute_budget（retry_count 从0开始+1=1）
     # 旧链路 route_after_budget 条件边回退两次 → retry_count=2；新链路正确行为 == 1
     assert final["budget"]["retry_count"] == 1
+    # note 守护：新线性图一次性判定，over=True 且 retry=True（retry_count=0<_MAX_RETRY=2），
+    # 不触发 "已尽力压缩" 分支（over and not retry），故 note 保持初始空字符串 ""
+    assert final["budget"]["note"] == ""
