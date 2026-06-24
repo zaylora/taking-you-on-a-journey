@@ -37,6 +37,10 @@ class TripState(TypedDict, total=False):
     clarified: bool
     clarify_round: int
 
+    # —— 线性编排：单元间传值 ——
+    operations: list           # understand 解析出的有序原子操作
+    context: dict              # collect_context 预取的数据（weather/attractions/restaurants）
+
     # —— 并行检索产出（各写独立字段，避免写冲突）——
     weather: dict
     attractions: list

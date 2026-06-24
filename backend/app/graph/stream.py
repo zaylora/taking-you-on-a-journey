@@ -46,7 +46,7 @@ async def sse_events(message: str, thread_id: str | None, request):
             kind, name = ev["event"], ev.get("name")
             if kind == "on_chain_start" and name in NODES:
                 yield _sse(EVENT_NODE_START, {"node": name, "label": NODE_LABELS.get(name, "")})
-            elif kind == "on_chat_model_stream" and ev.get("metadata", {}).get("langgraph_node") == "summarize":
+            elif kind == "on_chat_model_stream" and ev.get("metadata", {}).get("langgraph_node") == "render":
                 tok = ev["data"]["chunk"].content
                 if tok:
                     yield _sse(EVENT_TOKEN, {"text": tok})

@@ -21,9 +21,8 @@ def test_event_constants_present():
 
 
 def test_node_labels_cover_all_nodes():
-    assert C.NODES == {"memory", "dispatch_agent", "clarify", "retrieve", "weather", "attractions",
-                       "restaurants", "transport", "itinerary", "refine", "answer",
-                       "accommodation", "budget", "summarize", "memory_update"}
+    # Task 11 切图后：6 节点直线拓扑
+    assert C.NODES == {"memory", "understand", "collect_context", "apply", "render", "memory_update"}
     for n in C.NODES:
         assert C.NODE_LABELS.get(n)  # 每个节点都有非空中文文案
 
