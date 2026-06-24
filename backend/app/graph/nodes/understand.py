@@ -15,7 +15,7 @@ from app.core.constants import MAX_CLARIFY_ROUNDS
 from app.graph.nodes.dispatch import NormalizedReq, _SYS as _DISPATCH_SYS
 from app.graph.nodes.dispatch_agent import (
     IntentResult, _rule_based_intent, _INTENT_SYS,
-    _REFINE_SYS, _day_plans_digest,
+    _parse_refine_llm,
 )
 from app.graph.nodes.refine_ops import RefinePlan
 from app.graph.nodes.clarify import _evaluate_gaps, _apply_answer
@@ -65,17 +65,7 @@ async def understand(state: dict, config=None) -> dict:
 
     # —— refine ——
     if result.intent == "refine_existing":
-        llm_refine = build_llm(temperature=0).with_structured_output(RefinePlan, method="function_calling")
-        plan: RefinePlan = await llm_refine.ainvoke([
-            SystemMessage(content=_REFINE_SYS),
-            HumanMessage(content=str({
-                "query": query,
-                "target_day_hint": result.target_day,
-                "day_plans": _day_plans_digest(state.get("day_plans") or []),
-                "city": state.get("city", ""),
-                "conversation_summary": state.get("conversation_summary", ""),
-            })),
-        ], config=config)
+        plan: RefinePlan = await _parse_refine_llm(state, query, result.target_day, config, build_llm_fn=build_llm)
         if not plan.operations and plan.clarification:
             return {"operations": [{"op": "answer_only", "question": query}],
                     "last_intent": "qa", "refine_clarification": plan.clarification}
@@ -83,7 +73,8 @@ async def understand(state: dict, config=None) -> dict:
         req = dict(state.get("normalized_req", {}) or {})
         res = preflight(operations, {**state, "normalized_req": req})
         if res.clarification:
-            ans = interrupt({"field": "city", "question": res.clarification, "options": []})
+            missing_field = res.blocked[0]["missing"][0] if res.blocked else "city"
+            ans = interrupt({"field": missing_field, "question": res.clarification, "options": []})
             req["city"] = ans.strip() if isinstance(ans, str) else req.get("city", "")
             res = preflight(operations, {**state, "normalized_req": req})
         return {"operations": res.operations, "last_intent": "refine_existing", "normalized_req": req}

@@ -82,8 +82,9 @@ def _day_plans_digest(day_plans: list) -> list:
     return digest
 
 
-async def _parse_refine_llm(state: dict, query: str, target_day, config) -> RefinePlan:
-    llm = build_llm(temperature=0).with_structured_output(RefinePlan, method="function_calling")
+async def _parse_refine_llm(state: dict, query: str, target_day, config, *, build_llm_fn=None) -> RefinePlan:
+    factory = build_llm_fn or build_llm
+    llm = factory(temperature=0).with_structured_output(RefinePlan, method="function_calling")
     return await llm.ainvoke([
         SystemMessage(content=_REFINE_SYS),
         HumanMessage(content=str({
