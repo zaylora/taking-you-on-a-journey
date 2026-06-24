@@ -17,6 +17,8 @@ from app.itinerary.opentime import parse_opentime
 from app.itinerary.optimizer import solve_vrptw
 from app.itinerary.prefilter import select_candidates
 from app.itinerary.soft_fill import annotate_soft_fields
+from app.graph.nodes.accommodation import assign_hotels
+from app.graph.nodes.budget import compute_budget
 from app.graph.nodes.refine import _apply_day_op, _finalize_day, _find_day, _overnight_days
 from app.tools import amap
 
@@ -155,7 +157,14 @@ async def apply_operations(operations: list[dict], context: dict, state: dict, c
         if idx is None:
             skipped.append(f"第{day}天未找到，已跳过")
             continue
-        dp, ok, note = await _apply_day_op(state, day_plans[idx], op)
+        # city 闭环：preflight 补救的 city 在 op.requirements_patch/normalized_req，
+        # 但 _set_region 读 state['city']；此处注入，确保「缺顶层 city」时换区域仍能 geocode。
+        nreq = state.get("normalized_req", {}) or {}
+        patch = op.get("requirements_patch") or {}
+        eff_state = {**state,
+                     "city": patch.get("city") or nreq.get("city") or state.get("city", ""),
+                     "preferences": nreq.get("preferences") or state.get("preferences", {}) or {}}
+        dp, ok, note = await _apply_day_op(eff_state, day_plans[idx], op)
         day_plans[idx] = dp
         if ok:
             applied.append(note)
@@ -170,6 +179,21 @@ async def apply_operations(operations: list[dict], context: dict, state: dict, c
             day_plans[i] = _finalize_day(day_plans[i])
 
     needs_budget = any(o.get("op") != "reorder" and o.get("op") != "answer_only" for o in operations)
+
+    # 住宿重算：仅当本轮需要（set_hotel / replace_plan）
+    if needs_accom and day_plans:
+        city = (state.get("normalized_req", {}) or {}).get("city") or state.get("city", "")
+        prefs = (state.get("normalized_req", {}) or {}).get("preferences") or state.get("preferences", {}) or {}
+        day_plans = await assign_hotels(day_plans, city, prefs, centers, config)
+
+    # 预算重算：仅当本轮需要且能确定 limit
+    budget_check = None
+    limit = budget_new if budget_new is not None else state.get("budget")
+    if needs_budget and limit:
+        num_people = (state.get("normalized_req", {}) or {}).get("num_people") or state.get("num_people", 1) or 1
+        bc = compute_budget(day_plans, num_people, float(limit), state.get("retry_count", 0) or 0)
+        budget_check = bc["budget_check"]
+
     plan_version = (state.get("plan_version", 0) or 0) + (1 if changed else 0)
     out: dict = {
         "day_plans": day_plans,
@@ -185,4 +209,6 @@ async def apply_operations(operations: list[dict], context: dict, state: dict, c
     }
     if budget_new is not None:
         out["budget"] = budget_new
+    if budget_check is not None:
+        out["budget_check"] = budget_check
     return out
