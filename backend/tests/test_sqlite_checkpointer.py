@@ -6,7 +6,7 @@ import app.tools.amap as amap
 
 
 async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
-    from app.graph.nodes import clarify as c, dispatch_agent as d, itinerary as it, summarize as s
+    from app.graph.nodes import understand as u, render as r
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
     from app.itinerary import soft_fill as sf
@@ -25,15 +25,18 @@ async def test_sqlite_checkpointer_restores_thread_state(tmp_path, monkeypatch):
         return []
     monkeypatch.setattr(amap, "search_around", _sa)
 
-    monkeypatch.setattr(c, "_evaluate_gaps", no_gaps)
-    monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
+    # understand 直接导入 _evaluate_gaps，须 patch understand 模块属性
+    monkeypatch.setattr(u, "_evaluate_gaps", no_gaps)
+    # 新链路：understand.build_llm 承载标准化 LLM 调用（city 写入顶层 state）
+    monkeypatch.setattr(u, "build_llm", make_fake_build_llm(
         structured=NormalizedReq(city="成都", days=1, num_people=1)))
     monkeypatch.setattr(sf, "build_llm", make_fake_build_llm(structured=DayPlans(days=[
         DayPlan(day=1, weather=DayWeather(), center=Location(lng=104.0, lat=30.6),
                 items=[PlanItem(type="attraction", name="武侯祠", poi_id="B1",
                                 location=Location(lng=104.0, lat=30.6))])
     ])))
-    monkeypatch.setattr(s, "build_llm", make_fake_build_llm(tokens=["行程", "完成"]))
+    # 新链路：token 由 render 节点冒泡
+    monkeypatch.setattr(r, "build_llm", make_fake_build_llm(tokens=["行程", "完成"]))
 
     db_path = str(tmp_path / "checkpoints.sqlite")
     config = {"configurable": {"thread_id": "persist-thread"}}

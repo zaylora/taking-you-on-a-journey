@@ -9,7 +9,7 @@ def _extract(body: str, event: str) -> dict:
 
 
 def test_qa_turn_does_not_retrieve_or_modify_plan(client, fake_amap, monkeypatch):
-    from app.graph.nodes import accommodation as acc, answer as ans, clarify as c, dispatch_agent as d, itinerary as it, summarize as s
+    from app.graph.nodes import accommodation as acc, understand as u, render as r
     from app.graph.nodes.accommodation import _AccoResult
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
@@ -19,8 +19,10 @@ def test_qa_turn_does_not_retrieve_or_modify_plan(client, fake_amap, monkeypatch
     async def no_gaps(_state, _config=None):
         return []
 
-    monkeypatch.setattr(c, "_evaluate_gaps", no_gaps)
-    monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
+    # understand 直接导入 _evaluate_gaps，须 patch understand 模块属性
+    monkeypatch.setattr(u, "_evaluate_gaps", no_gaps)
+    # 新链路：understand.build_llm 承载标准化/意图 LLM 调用
+    monkeypatch.setattr(u, "build_llm", make_fake_build_llm(
         structured=NormalizedReq(city="成都", days=1, num_people=2, budget=4000)))
     monkeypatch.setattr(sf, "build_llm", make_fake_build_llm(structured=DayPlans(days=[
         DayPlan(day=1, weather=DayWeather(), center=Location(lng=104.0, lat=30.6), items=[
@@ -28,7 +30,8 @@ def test_qa_turn_does_not_retrieve_or_modify_plan(client, fake_amap, monkeypatch
         ]),
     ])))
     monkeypatch.setattr(acc, "build_llm", make_fake_build_llm(structured=_AccoResult(assignments=[])))
-    monkeypatch.setattr(s, "build_llm", make_fake_build_llm(tokens=["已生成", "成都行程"]))
+    # 新链路：第一轮 plan_new 攻略 token 由 render 冒泡（summarize+answer 合入 render）
+    monkeypatch.setattr(r, "build_llm", make_fake_build_llm(tokens=["已生成", "成都行程"]))
 
     # 新管线：景点来自 search_poi（算法建骨架），软填 stub poi_id 须对齐(武侯祠 B1)
     fake_amap["search_poi"] = [
@@ -45,7 +48,8 @@ def test_qa_turn_does_not_retrieve_or_modify_plan(client, fake_amap, monkeypatch
     import app.tools.amap as amap
     monkeypatch.setattr(amap, "search_poi", fail_if_retrieved)
 
-    monkeypatch.setattr(ans, "build_llm", make_fake_build_llm(tokens=["整体适合老人，但建议放慢节奏。"]))
+    # 新链路：QA 回答由 render 节点冒泡（answer+summarize 合入 render）
+    monkeypatch.setattr(r, "build_llm", make_fake_build_llm(tokens=["整体适合老人，但建议放慢节奏。"]))
 
     second = client.post(
         "/api/chat",

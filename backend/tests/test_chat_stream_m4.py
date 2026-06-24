@@ -10,8 +10,7 @@ def _extract_final(body: str) -> dict:
 
 
 def _stub(monkeypatch, *, item_cost, hotel_price, budget_limit, days=2, num_people=2):
-    from app.graph.nodes import (clarify as c, dispatch_agent as d, itinerary as it,
-                                  accommodation as acc, summarize as s)
+    from app.graph.nodes import understand as u, accommodation as acc, render as r
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather, Hotel
     from app.graph.nodes.accommodation import _AccoResult, _HotelForDay
@@ -20,8 +19,10 @@ def _stub(monkeypatch, *, item_cost, hotel_price, budget_limit, days=2, num_peop
 
     async def no_gaps(_state, _config=None):
         return []
-    monkeypatch.setattr(c, "_evaluate_gaps", no_gaps)
-    monkeypatch.setattr(d, "build_llm", make_fake_build_llm(
+    # understand 直接导入 _evaluate_gaps，须 patch understand 模块属性
+    monkeypatch.setattr(u, "_evaluate_gaps", no_gaps)
+    # 新链路：understand.build_llm 承载标准化 LLM 调用
+    monkeypatch.setattr(u, "build_llm", make_fake_build_llm(
         structured=NormalizedReq(city="成都", days=days, num_people=num_people,
                                  preferences={"住宿": "舒适"}, budget=float(budget_limit))))
     # 新管线：OR-Tools 决定分天/顺序，软填 stub 无法预知。让每一天都带上所有候选景点的
@@ -37,7 +38,8 @@ def _stub(monkeypatch, *, item_cost, hotel_price, budget_limit, days=2, num_peop
         _HotelForDay(day=1, hotel=Hotel(name="如家", poi_id="H1",
                                         location=Location(lng=104.0, lat=30.6),
                                         price=float(hotel_price), level="舒适"))])))
-    monkeypatch.setattr(s, "build_llm", make_fake_build_llm(tokens=["行程", "攻略"]))
+    # 新链路：token 由 render 节点冒泡
+    monkeypatch.setattr(r, "build_llm", make_fake_build_llm(tokens=["行程", "攻略"]))
 
 
 def test_final_carries_budget_and_hotel_under_budget(client, fake_amap, monkeypatch):
@@ -68,5 +70,6 @@ def test_over_budget_retries_then_caps(client, fake_amap, monkeypatch):
     body = client.post("/api/chat", json={"message": "成都2天2人预算1000"}).text
     final = _extract_final(body)
     assert final["budget"]["over"] is True
-    assert final["budget"]["retry_count"] == 2          # 回退 2 次后封顶
-    assert final["budget"]["note"].startswith("已尽力压缩")
+    # 新链路：6节点直线图无超支回退循环，apply 只调一次 compute_budget（retry_count 从0开始+1=1）
+    # 旧链路 route_after_budget 条件边回退两次 → retry_count=2；新链路正确行为 == 1
+    assert final["budget"]["retry_count"] == 1

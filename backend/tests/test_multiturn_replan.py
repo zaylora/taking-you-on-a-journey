@@ -10,7 +10,7 @@ def _extract(body: str, event: str) -> dict:
 
 
 def test_replan_replaces_old_city_and_day_plans(client, fake_amap, monkeypatch):
-    from app.graph.nodes import accommodation as acc, clarify as c, dispatch_agent as d, itinerary as it, summarize as s
+    from app.graph.nodes import accommodation as acc, understand as u, render as r
     from app.itinerary import soft_fill as sf
     from app.graph.nodes.accommodation import _AccoResult
     from app.graph.nodes.dispatch import NormalizedReq
@@ -20,7 +20,8 @@ def test_replan_replaces_old_city_and_day_plans(client, fake_amap, monkeypatch):
     async def no_gaps(_state, _config=None):
         return []
 
-    monkeypatch.setattr(c, "_evaluate_gaps", no_gaps)
+    # understand 直接导入 _evaluate_gaps，须 patch understand 模块属性
+    monkeypatch.setattr(u, "_evaluate_gaps", no_gaps)
     reqs = iter([
         NormalizedReq(city="成都", days=1, num_people=1),
         NormalizedReq(city="上海", days=2, num_people=1),
@@ -45,10 +46,12 @@ def test_replan_replaces_old_city_and_day_plans(client, fake_amap, monkeypatch):
     def itinerary_llm(*_args, **_kwargs):
         return make_fake_build_llm(structured=next(plans))()
 
-    monkeypatch.setattr(d, "build_llm", dispatch_llm)
+    # 新链路：understand.build_llm 承载标准化 LLM 调用（每轮迭代 next(reqs)）
+    monkeypatch.setattr(u, "build_llm", dispatch_llm)
     monkeypatch.setattr(sf, "build_llm", itinerary_llm)
     monkeypatch.setattr(acc, "build_llm", make_fake_build_llm(structured=_AccoResult(assignments=[])))
-    monkeypatch.setattr(s, "build_llm", make_fake_build_llm(tokens=["攻略"]))
+    # 新链路：token 由 render 节点冒泡
+    monkeypatch.setattr(r, "build_llm", make_fake_build_llm(tokens=["攻略"]))
 
     # 新节点：景点来自算法（amap.search_poi），LLM 只填软字段。
     # 第一轮：成都武侯祠；第二轮：上海外滩+上海博物馆
