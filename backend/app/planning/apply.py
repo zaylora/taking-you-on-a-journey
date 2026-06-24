@@ -6,6 +6,7 @@
 能力函数一律从原始模块 import，不经 nodes.itinerary re-export。
 """
 import os
+from copy import deepcopy
 
 from app.core.config import get_settings
 from app.core.constants import AROUND_RADIUS_M
@@ -16,6 +17,7 @@ from app.itinerary.opentime import parse_opentime
 from app.itinerary.optimizer import solve_vrptw
 from app.itinerary.prefilter import select_candidates
 from app.itinerary.soft_fill import annotate_soft_fields
+from app.graph.nodes.refine import _apply_day_op, _finalize_day, _find_day, _overnight_days
 from app.tools import amap
 
 
@@ -101,3 +103,86 @@ async def replace_plan(req: dict, context: dict, state: dict, config=None) -> di
         "dropped_attractions": dropped_pre + dropped_solver,
         "relax_level": relax,
     }
+
+
+async def apply_operations(operations: list[dict], context: dict, state: dict, config=None) -> dict:
+    """按序执行 operations，统一收尾 + 诚实回报。住宿/预算重算在 Task 6 接入。"""
+    day_plans = deepcopy(state.get("day_plans", []) or [])
+    centers = list(state.get("daily_centers", []) or [])
+    dropped = list(state.get("dropped_attractions", []) or [])
+    relax = state.get("relax_level", 0)
+    applied: list[str] = []
+    skipped: list[str] = []
+    changed: set[int] = set()
+    touched: set[int] = set()
+    needs_accom = False
+    budget_new = None
+
+    for op in operations:
+        kind = op.get("op")
+        if kind == "answer_only":
+            continue
+        if kind == "replace_plan":
+            req = {**(state.get("normalized_req") or {}), **(op.get("requirements_patch") or {})}
+            res = await replace_plan(req, context, state, config)
+            day_plans = res["day_plans"]
+            centers = res["daily_centers"]
+            dropped = res["dropped_attractions"]
+            relax = res["relax_level"]
+            changed = {d.get("day") for d in day_plans}
+            touched = set()   # replace_plan 产出已 finalize（含交通段+center）
+            needs_accom = True
+            applied.append(f"已重新规划 {len(day_plans)} 天行程")
+            continue
+        if kind == "set_budget":
+            amt = op.get("amount")
+            if amt is None:
+                skipped.append("预算调整缺少金额，已跳过")
+                continue
+            budget_new = float(amt)
+            applied.append(f"预算改为 {budget_new:.0f}")
+            continue
+        if kind == "set_hotel":
+            days = op.get("days") or _overnight_days(day_plans)
+            needs_accom = True
+            for d in days:
+                changed.add(d)
+            applied.append("酒店偏好已更新，将重排住宿")
+            continue
+        # 局部按天 op：复用 refine helper
+        day = op.get("day")
+        idx = _find_day(day_plans, day)
+        if idx is None:
+            skipped.append(f"第{day}天未找到，已跳过")
+            continue
+        dp, ok, note = await _apply_day_op(state, day_plans[idx], op)
+        day_plans[idx] = dp
+        if ok:
+            applied.append(note)
+            changed.add(day)
+            touched.add(day)
+        else:
+            skipped.append(note)
+
+    for d in touched:
+        i = _find_day(day_plans, d)
+        if i is not None:
+            day_plans[i] = _finalize_day(day_plans[i])
+
+    needs_budget = any(o.get("op") != "reorder" and o.get("op") != "answer_only" for o in operations)
+    plan_version = (state.get("plan_version", 0) or 0) + (1 if changed else 0)
+    out: dict = {
+        "day_plans": day_plans,
+        "daily_centers": centers,
+        "dropped_attractions": dropped,
+        "relax_level": relax,
+        "changed_days": sorted(c for c in changed if c is not None),
+        "plan_version": plan_version,
+        "applied": applied,
+        "skipped": skipped,
+        "needs_accommodation": needs_accom,
+        "needs_budget_recheck": needs_budget,
+    }
+    if budget_new is not None:
+        out["budget"] = budget_new
+    return out
