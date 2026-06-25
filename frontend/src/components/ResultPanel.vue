@@ -75,7 +75,7 @@
                     <span @click.stop>
                       <el-select
                         v-model="item.mode"
-                        size="mini"
+                        size="small"
                         class="transport-el-select"
                       >
                         <el-option label="公交/地铁" value="公交/地铁" />

@@ -51,6 +51,10 @@ export const useTripStore = defineStore('trip', () => {
   const activeThreadId = ref<string | null>(localStorage.getItem(STORAGE_KEY))
   const agentProgress = ref<Record<string, 'running' | 'done'>>({})
   const nodeLabels = ref<Record<string, string>>({})
+  // 工具调用过程链：按发生顺序记录每次工具调用及其状态（running→done）
+  const toolSteps = ref<Array<{ tool: string; label: string; status: 'running' | 'done' }>>([])
+  // 推理模型思考过程（reasoning_content）增量累积；非推理模型则恒为空
+  const thinkingText = ref('')
   const clarifyPending = ref<ClarifyPayload | null>(null)
 
   const activeConversation = computed(() =>
@@ -90,6 +94,8 @@ export const useTripStore = defineStore('trip', () => {
   const clearProgress = () => {
     agentProgress.value = {}
     nodeLabels.value = {}
+    toolSteps.value = []
+    thinkingText.value = ''
   }
 
   const setActiveThread = (id: string | null) => {
@@ -148,6 +154,22 @@ export const useTripStore = defineStore('trip', () => {
     if (label) nodeLabels.value[node] = label
   }
   const endNode = (node: string) => { agentProgress.value[node] = 'done' }
+
+  // 工具开始：把上一个仍在 running 的步骤收尾（ReAct 串行执行），再追加新步骤
+  const startToolCall = (tool: string, label: string) => {
+    for (const s of toolSteps.value) if (s.status === 'running') s.status = 'done'
+    toolSteps.value.push({ tool, label, status: 'running' })
+  }
+  // 工具结束：把最近一个同名 running 步骤标记 done
+  const endToolCall = (tool: string) => {
+    for (let i = toolSteps.value.length - 1; i >= 0; i--) {
+      if (toolSteps.value[i].tool === tool && toolSteps.value[i].status === 'running') {
+        toolSteps.value[i].status = 'done'
+        break
+      }
+    }
+  }
+  const appendThinking = (text: string) => { thinkingText.value += text }
 
   const setThreadId = (id: string) => {
     if (!conversations.value.some((c) => c.threadId === id)) {
@@ -219,9 +241,11 @@ export const useTripStore = defineStore('trip', () => {
   return {
     conversations, activeThreadId, activeConversation,
     messages, agentProgress, nodeLabels, threadId, dayPlans, clarifyPending,
+    toolSteps, thinkingText,
     activeDay, activePoiId, activeTransport, budget,
     loadConversations, loadConversation, createConversation, ensureConversation,
     addMessage, appendToLastMessage, startNode, endNode, clearProgress,
+    startToolCall, endToolCall, appendThinking,
     setThreadId, setTitle, setClarify, clearClarify, setDayPlans, setActiveDay,
     setActivePoi, setActiveTransport, setBudget, setPlanVersion, touchActive,
   }

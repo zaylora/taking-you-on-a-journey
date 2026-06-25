@@ -4,6 +4,7 @@
 检索类直接复用 app/tools/amap.py（失败降级，不抛）。
 编排/核算/收尾类见后续步骤；ask_user 经 interrupt 暂停。
 """
+import json
 import os
 from typing import Annotated
 
@@ -146,13 +147,22 @@ async def assign_hotels(city: str, day_plans: list, level: str = "舒适",
 
 @tool
 async def compute_budget_tool(day_plans: list, num_people: int = 1, limit: float = 0.0,
-                              state: Annotated[dict, InjectedState] = None) -> dict:
-    """核算行程总花费并判定是否超预算。返回 {budget_check, cut_suggestions}。
-    超支时 cut_suggestions 给出可削减的高价项；是否重排由你（agent）自主决定。"""
+                              tool_call_id: Annotated[str, InjectedToolCallId] = "",
+                              state: Annotated[dict, InjectedState] = None) -> Command:
+    """核算行程总花费并判定是否超预算：把 budget_check 写回 state（供前端预算条展示）、累计 retry_count，
+    并回传 {budget_check, cut_suggestions} 供你查看。超支时 cut_suggestions 给出可削减的高价项；
+    是否重排由你（agent）自主决定。"""
     retry_count = (state or {}).get("retry_count", 0) or 0
     res = compute_budget(day_plans, max(1, num_people), limit or 0.0, retry_count)
     advice = res["advice"] or {}
-    return {"budget_check": res["budget_check"], "cut_suggestions": advice.get("cut_suggestions", [])}
+    budget_check = res["budget_check"]
+    summary = {"budget_check": budget_check, "cut_suggestions": advice.get("cut_suggestions", [])}
+    return Command(update={
+        "budget_check": budget_check,
+        "retry_count": res["retry_count"],
+        "messages": [ToolMessage(
+            json.dumps(summary, ensure_ascii=False), tool_call_id=tool_call_id)],
+    })
 
 
 @tool

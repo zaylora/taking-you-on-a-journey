@@ -76,14 +76,41 @@ from langgraph.types import Command as _Command
 
 
 @pytest.mark.asyncio
-async def test_compute_budget_tool_reports_over(fake_amap):
-    dps = [{"day": 1, "items": [{"type": "attraction", "name": "A", "cost": 5000}]}, {"day": 2, "items": []}]
-    out = await tools.compute_budget_tool.ainvoke({
-        "day_plans": dps, "num_people": 1, "limit": 100,
-        "state": {"retry_count": 0},
+async def test_compute_budget_tool_writes_budget_check_to_state(fake_amap):
+    """必须用 Command 把 budget_check/retry_count 写回 state，
+    否则 stream 层 aget_state 读不到 → 前端预算条永远空。"""
+    dps = [{"day": 1, "items": [
+        {"type": "attraction", "name": "A", "cost": 100.0},
+        {"type": "meal", "name": "B", "cost": 50.0},
+    ]}]
+    cmd = await tools.compute_budget_tool.ainvoke({
+        "type": "tool_call",
+        "name": "compute_budget_tool",
+        "id": "call_b",
+        "args": {"day_plans": dps, "num_people": 2, "limit": 0.0,
+                 "state": {"retry_count": 0}},
     })
-    assert out["budget_check"]["over"] is True
-    assert isinstance(out["cut_suggestions"], list)
+    assert isinstance(cmd, _Command), "必须返回 Command 才能写回 state"
+    assert cmd.update["budget_check"]["estimated"] == 300.0  # (100+50)*2
+    assert "retry_count" in cmd.update
+    assert cmd.update.get("messages")  # 回传 ToolMessage 供 agent 据此决策
+
+
+@pytest.mark.asyncio
+async def test_compute_budget_tool_over_and_accumulates_retry(fake_amap):
+    """超预算时 over=True，且 retry_count 递增写回，供 _MAX_RETRY 上限生效。"""
+    dps = [{"day": 1, "items": [{"type": "attraction", "name": "A", "cost": 5000}]},
+           {"day": 2, "items": []}]
+    cmd = await tools.compute_budget_tool.ainvoke({
+        "type": "tool_call",
+        "name": "compute_budget_tool",
+        "id": "call_b",
+        "args": {"day_plans": dps, "num_people": 1, "limit": 100,
+                 "state": {"retry_count": 0}},
+    })
+    assert isinstance(cmd, _Command)
+    assert cmd.update["budget_check"]["over"] is True
+    assert cmd.update["retry_count"] == 1  # 0 → 1
 
 
 @pytest.mark.asyncio

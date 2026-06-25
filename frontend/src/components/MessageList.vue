@@ -41,7 +41,11 @@ const renderMarkdown = (text: string | undefined) => {
 }
 
 const tripStore = useTripStore()
-const hasProgress = computed(() => Object.keys(tripStore.agentProgress).length > 0)
+const hasProgress = computed(() =>
+  Object.keys(tripStore.agentProgress).length > 0 ||
+  tripStore.toolSteps.length > 0 ||
+  !!tripStore.thinkingText,
+)
 
 const listRef = ref<HTMLElement | null>(null)
 

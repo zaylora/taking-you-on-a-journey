@@ -145,15 +145,34 @@ const updateMarkerVisibility = () => {
   }
 }
 
-// 把若干天的行程拆成「分段总览路线」：每个交通段一条 leg，带自己的 mode。
-// 复用 getTransportLocations（按全局 dayPlans 定位起讫），单天/全天通用。
+// 校验经纬度有效（存在、为数字、非 (0,0) 占位坐标）。
+const validLoc = (loc: any) =>
+  loc && typeof loc.lng === 'number' && typeof loc.lat === 'number' && (loc.lng !== 0 || loc.lat !== 0)
+
+// 把若干天的行程拆成「分段总览路线」：按当天实体点（景点/餐饮，末尾追加酒店）的生成顺序
+// 相邻两两连一条 leg，由高德按 mode 规划真实路网路线。
+// transport 段不再作为画线依据（景点间常无 transport 段），而是把它的 mode 吸附到其后那段连线上；
+// 缺省 mode 由高德按驾车规划。开头的城际段（起点为外地、无坐标）因前面没有实体点而自然排除。
 const buildOverviewLegs = (plans: any[]) => {
   const legs: Array<{ start: any; end: any; mode?: string }> = []
   for (const dp of plans) {
+    const stops: Array<{ loc: any; mode: string }> = []
+    let pendingMode = ''
     for (const item of dp.items) {
-      if (item.type !== 'transport') continue
-      const { startLoc, endLoc } = getTransportLocations(item)
-      if (startLoc && endLoc) legs.push({ start: startLoc, end: endLoc, mode: item.mode })
+      if (item.type === 'transport') {
+        if (item.mode) pendingMode = item.mode
+        continue
+      }
+      if (validLoc(item.location)) {
+        stops.push({ loc: item.location, mode: pendingMode })
+        pendingMode = ''
+      }
+    }
+    if (dp.hotel && validLoc(dp.hotel.location)) {
+      stops.push({ loc: dp.hotel.location, mode: pendingMode })
+    }
+    for (let i = 0; i + 1 < stops.length; i++) {
+      legs.push({ start: stops[i].loc, end: stops[i + 1].loc, mode: stops[i + 1].mode })
     }
   }
   return legs
@@ -209,7 +228,8 @@ watch(
         transportItem.routeInfo = info
       })
     } else {
-      console.warn('无法解析此交通路线的起点或终点坐标')
+      // 城际/出发段起点在外地、无市内坐标，本就画不出路线——静默清空，不报错刷屏
+      amap.clearRoute()
     }
   }
 )

@@ -1,6 +1,9 @@
 export interface NodeStartPayload { node: string; label?: string }
 export interface TokenPayload { text: string }
 export interface NodeEndPayload { node: string }
+export interface ThinkingPayload { text: string }
+export interface ToolCallPayload { tool: string; label: string }
+export interface ToolResultPayload { tool: string; label: string }
 export interface BudgetBreakdown { ticket: number; hotel: number; food: number; transport: number }
 export interface Budget {
   limit: number
@@ -65,4 +68,5 @@ export interface DayPlan {
 
 export type EventName =
   | 'session' | 'title' | 'plan_patch' | 'intent'
-  | 'node_start' | 'token' | 'node_end' | 'clarify' | 'final' | 'error';
+  | 'node_start' | 'token' | 'node_end' | 'clarify' | 'final' | 'error'
+  | 'thinking' | 'tool_call' | 'tool_result';

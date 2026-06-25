@@ -21,6 +21,11 @@ TRIP_AGENT_SYS = (
     "改完同样调用 finalize_plan。\n"
     "5. 纯问答（询问已有行程、是否合适等）直接回答，不要调用 finalize_plan。\n"
     "\n"
+    "【硬性约束】只要本轮产生或改动了逐日行程（assemble_itinerary 或 assign_hotels 有输出），"
+    "结束前【必须】调用一次 finalize_plan，把完整的 day_plans 传进去。"
+    "前端的行程板和地图只读取 finalize_plan 写入的数据——若不调用，用户将看不到任何行程。"
+    "绝不能只在文字里描述行程却跳过 finalize_plan。\n"
+    "\n"
     "完成后，用简体中文输出面向用户的最终回复：规划/修改场景写清晰的逐日攻略，"
     "问答场景直接回答问题。语气友好实用。"
 )

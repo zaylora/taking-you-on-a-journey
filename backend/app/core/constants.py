@@ -16,6 +16,10 @@ EVENT_TITLE = "title"       # data: {"thread_id","title"} —— 会话标题更
 EVENT_INTENT = "intent"     # data: {"intent"} —— M5 意图调试/进度
 EVENT_PLAN_PATCH = "plan_patch"  # data: {"plan_version","changed_days"} —— 局部更新提示
 
+EVENT_THINKING = "thinking"        # data: {"text"} —— 推理模型思考过程增量（reasoning_content）
+EVENT_TOOL_CALL = "tool_call"      # data: {"tool","label"} —— 工具开始执行
+EVENT_TOOL_RESULT = "tool_result"  # data: {"tool","label"} —— 工具执行结束
+
 # 图节点全集（create_agent 内部节点：model 决策/回复、tools 执行）
 NODES = {"agent", "model", "tools"}
 
@@ -24,4 +28,17 @@ NODE_LABELS = {
     "agent": "正在思考...",
     "model": "正在思考...",
     "tools": "正在调用工具...",
+}
+
+# 工具名 → 前端展示的友好中文文案（用于 tool_call / tool_result 过程链）
+TOOL_LABELS = {
+    "search_attractions": "搜索景点",
+    "search_restaurants": "搜索餐厅",
+    "get_weather": "查询天气",
+    "plan_route": "规划交通",
+    "assemble_itinerary": "编排逐日行程",
+    "assign_hotels": "安排住宿",
+    "compute_budget_tool": "核算预算",
+    "ask_user": "向你确认信息",
+    "finalize_plan": "确认行程",
 }

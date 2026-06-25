@@ -5,6 +5,7 @@ token 仅放行 metadata.langgraph_node=="summarize"。
 import json
 import logging
 
+from langchain_core.messages import HumanMessage
 from langgraph.types import Command
 
 logger = logging.getLogger(__name__)
@@ -12,6 +13,7 @@ logger = logging.getLogger(__name__)
 from app.core.constants import (
     EVENT_SESSION, EVENT_NODE_START, EVENT_TOKEN, EVENT_NODE_END,
     EVENT_CLARIFY, EVENT_FINAL, EVENT_ERROR, EVENT_PLAN_PATCH, EVENT_TITLE, NODES, NODE_LABELS,
+    EVENT_THINKING, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, TOOL_LABELS,
 )
 from app.services.session_store import DEFAULT_TITLE, title_from_message
 
@@ -36,23 +38,35 @@ async def sse_events(message: str, thread_id: str | None, request):
     try:
         if new_session:
             yield _sse(EVENT_SESSION, {"thread_id": thread_id})
-            stream_input = {"query": message, "messages": [],
-                            "clarified": False, "clarify_round": 0}
+            stream_input = {"messages": [HumanMessage(content=message)]}
         else:
             snap = await graph.aget_state(config)
             pending = any(t.interrupts for t in snap.tasks) if snap and snap.tasks else False
-            stream_input = Command(resume=message) if pending else {"query": message}
+            stream_input = (
+                Command(resume=message)
+                if pending
+                else {"messages": [HumanMessage(content=message)]}
+            )
 
         async for ev in graph.astream_events(stream_input, config=config, version="v2"):
             if await request.is_disconnected():
                 break
             kind, name = ev["event"], ev.get("name")
-            if kind == "on_chain_start" and name in NODES:
+            if kind == "on_chat_model_stream":
+                chunk = ev["data"]["chunk"]
+                ak = getattr(chunk, "additional_kwargs", {}) or {}
+                # 豆包等推理模型：思考过程在 reasoning_content，答复正文在 content，时序先思考后答复
+                reasoning = ak.get("reasoning_content") or ak.get("reasoning")
+                if reasoning:
+                    yield _sse(EVENT_THINKING, {"text": reasoning})
+                if chunk.content:
+                    yield _sse(EVENT_TOKEN, {"text": chunk.content})
+            elif kind == "on_tool_start":
+                yield _sse(EVENT_TOOL_CALL, {"tool": name, "label": TOOL_LABELS.get(name, name)})
+            elif kind == "on_tool_end":
+                yield _sse(EVENT_TOOL_RESULT, {"tool": name, "label": TOOL_LABELS.get(name, name)})
+            elif kind == "on_chain_start" and name in NODES:
                 yield _sse(EVENT_NODE_START, {"node": name, "label": NODE_LABELS.get(name, "")})
-            elif kind == "on_chat_model_stream":
-                tok = ev["data"]["chunk"].content
-                if tok:
-                    yield _sse(EVENT_TOKEN, {"text": tok})
             elif kind == "on_chain_end" and name in NODES:
                 yield _sse(EVENT_NODE_END, {"node": name})
 
