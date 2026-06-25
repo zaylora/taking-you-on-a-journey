@@ -1112,18 +1112,18 @@ git commit -m "feat(react): 检索类 4 工具 + 降级单测"
 
 ---
 
-## Task 7: 工具层 — 编排 2 工具（assemble_itinerary / assign_hotels）
+## Task 7: 工具层 — 编排 2 工具（assemble_itinerary OR-Tools 管线 / assign_hotels）
 
-这两个工具内部调 LLM（structured output）。`build_llm` 用 `app/llm/factory.build_llm`；测试时 monkeypatch 成 `FakeStructuredLLM`。
+`assemble_itinerary` 内部跑完整 OR-Tools 管线：prefilter 粗筛 → 距离矩阵 → VRPTW 求解 → 装配骨架 → soft_fill（LLM 填软字段）。`assign_hotels` 为过夜日 LLM 分配酒店。两者对 LLM 透明（LLM 不感知 OR-Tools）。
 
 **Files:**
 - Modify: `app/agent/tools.py`（追加）
 - Test: `tests/agent/test_tools.py`（追加）
 
 **Interfaces:**
-- Consumes: `planning.cluster_by_day` / `daily_centers_of` / `DayPlans` / `ITINERARY_SYS`；`lodging.overnight_days` / `attach_hotels` / `hotel_keyword` / `_AccoResult` / `ACCO_SYS`；`app.llm.factory.build_llm`；`amap.search_poi`。
+- Consumes: `prefilter.select_candidates`；`matrix.duration_matrix`；`optimizer.solve_vrptw`；`assembler.routes_to_day_plans`；`planning.DayPlans` / `planning.ITINERARY_SYS`；`lodging.overnight_days` / `attach_hotels` / `hotel_keyword` / `_AccoResult` / `ACCO_SYS`；`app.llm.factory.build_llm`；`app.core.config.get_settings`（取 checkpoint_db_path 派生距离缓存路径）；`amap.search_poi`。
 - Produces:
-  - `assemble_itinerary(city, days, attractions, restaurants, weather, start_date="", num_people=1, budget_advice=None) -> dict` — 返回 `{"day_plans": [...], "daily_centers": [...]}`（day_plans 为 `by_alias` dump 的 list）。
+  - `assemble_itinerary(city, days, attractions, restaurants, weather, start_date="", num_people=1, budget_advice=None) -> dict` — 返回 `{"day_plans": [...], "daily_centers": [...]}`（day_plans 为 `by_alias` dump 的 list）。候选为空时返回 `{"day_plans": [], "daily_centers": []}`。
   - `assign_hotels(city, day_plans, level="舒适", daily_centers=None) -> list` — 返回嵌入 hotel 的 day_plans。
 
 - [ ] **Step 1: 写失败测试（追加到 test_tools.py）**
@@ -1135,17 +1135,33 @@ from tests.conftest import make_fake_build_llm
 
 
 @pytest.mark.asyncio
-async def test_assemble_itinerary_builds_day_plans(fake_amap, monkeypatch):
-    fake = DayPlans(days=[{"day": 1, "items": [{"type": "attraction", "name": "故宫", "cost": 60}]}])
+async def test_assemble_itinerary_runs_ortools_pipeline(fake_amap, monkeypatch):
+    # soft_fill 的 LLM 输出（structured DayPlans）
+    fake = DayPlans(days=[{"day": 1, "items": [
+        {"type": "attraction", "name": "故宫", "poi_id": "p1", "cost": 60}]}])
     monkeypatch.setattr("app.agent.tools.build_llm", make_fake_build_llm(structured=fake))
     out = await tools.assemble_itinerary.ainvoke({
         "city": "北京", "days": 1,
-        "attractions": [{"name": "故宫", "lng": 116.4, "lat": 39.9}],
+        "attractions": [
+            {"name": "故宫", "poi_id": "p1", "lng": 116.40, "lat": 39.92, "rating": 5.0},
+            {"name": "天坛", "poi_id": "p2", "lng": 116.41, "lat": 39.88, "rating": 4.8},
+        ],
         "restaurants": [], "weather": {"text": "晴"},
     })
     assert out["day_plans"][0]["day"] == 1
     assert out["day_plans"][0]["items"][0]["name"] == "故宫"
     assert "daily_centers" in out
+
+
+@pytest.mark.asyncio
+async def test_assemble_itinerary_empty_candidates(fake_amap, monkeypatch):
+    monkeypatch.setattr("app.agent.tools.build_llm",
+                        make_fake_build_llm(structured=DayPlans(days=[])))
+    out = await tools.assemble_itinerary.ainvoke({
+        "city": "北京", "days": 2, "attractions": [], "restaurants": [], "weather": {},
+    })
+    assert out["day_plans"] == []
+    assert out["daily_centers"] == []
 
 
 @pytest.mark.asyncio
@@ -1169,29 +1185,70 @@ Expected: FAIL，`AttributeError: module ... has no attribute 'assemble_itinerar
 ```python
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from app.agent.planning import (
-    cluster_by_day, daily_centers_of, DayPlans, ITINERARY_SYS,
-)
+from app.core.config import get_settings
+from app.agent.prefilter import select_candidates
+from app.agent.matrix import duration_matrix
+from app.agent.optimizer import solve_vrptw
+from app.agent.assembler import routes_to_day_plans
+from app.agent.planning import DayPlans, ITINERARY_SYS
 from app.agent.lodging import (
     overnight_days, attach_hotels, hotel_keyword, _AccoResult, ACCO_SYS,
 )
 from app.llm.factory import build_llm
 ```
 
-追加工具：
+补一个距离缓存路径辅助函数（与 checkpointer 分离，避免写锁冲突）：
+
+```python
+import os
+
+
+def _distance_cache_path() -> str:
+    """由 checkpoint 库路径派生同目录下独立的距离缓存库文件名。"""
+    ckpt = get_settings().checkpoint_db_path
+    d = os.path.dirname(ckpt) or "."
+    return os.path.join(d, "distance_cache.sqlite")
+```
+
+追加编排工具：
 
 ```python
 @tool
 async def assemble_itinerary(city: str, days: int, attractions: list, restaurants: list,
                              weather: dict, start_date: str = "", num_people: int = 1,
                              budget_advice: dict | None = None) -> dict:
-    """把景点/餐厅/天气编排成逐日行程。返回 {day_plans, daily_centers}。
-    内部先确定性分天聚类，再 LLM 填充时间线与人均 cost。budget_advice 非空时压低花费。"""
-    clusters = cluster_by_day(attractions or [], days)
-    centers = daily_centers_of(clusters)
+    """把景点编排成逐日行程。内部用 OR-Tools VRPTW 求最优分天+顺路（高德真实街道时间），
+    再由 LLM 填软字段（时间段/人均cost/说明）。返回 {day_plans, daily_centers}。
+    budget_advice 非空时压低花费。候选为空时返回空行程。"""
+    candidates = select_candidates(attractions or [], days)
+    if not candidates:
+        return {"day_plans": [], "daily_centers": []}
+
+    # depot = 候选质心，作为 0 号节点
+    cx = sum(c["lng"] for c in candidates) / len(candidates)
+    cy = sum(c["lat"] for c in candidates) / len(candidates)
+    depot = {"poi_id": "__depot__", "lng": cx, "lat": cy}
+    nodes = [depot] + candidates
+
+    matrix = await duration_matrix(nodes, _distance_cache_path())
+    routes = solve_vrptw(matrix, days)  # 每天节点索引(指向 nodes，0=depot)
+    skeleton = routes_to_day_plans(routes, candidates)  # assembler 用 1-based 指向 candidates
+
+    # 每天活动中心 = 当天景点质心
+    daily_centers = []
+    for day_plan in skeleton:
+        items = day_plan.get("items", [])
+        if items:
+            dx = sum(it["location"]["lng"] for it in items) / len(items)
+            dy = sum(it["location"]["lat"] for it in items) / len(items)
+        else:
+            dx = dy = 0.0
+        daily_centers.append({"lng": dx, "lat": dy})
+
+    # soft_fill：LLM 填时间/cost/note + 就近插餐厅，不改顺序与分天
     payload = {
-        "days": days, "clusters": clusters, "restaurants": restaurants or [],
-        "weather": weather or {}, "start_date": start_date, "num_people": max(1, num_people),
+        "skeleton": skeleton, "restaurants": restaurants or [], "weather": weather or {},
+        "start_date": start_date, "num_people": max(1, num_people),
     }
     if budget_advice:
         payload["budget_advice"] = budget_advice
@@ -1202,7 +1259,7 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
     ])
     return {
         "day_plans": [d.model_dump(by_alias=True) for d in result.days],
-        "daily_centers": centers,
+        "daily_centers": daily_centers,
     }
 
 
@@ -1229,19 +1286,21 @@ async def assign_hotels(city: str, day_plans: list, level: str = "舒适",
     return attach_hotels(day_plans, assignments)
 ```
 
+> 注意：`assemble_itinerary` 的 soft_fill LLM 输出的 day_plans 直接作为结果。skeleton 已含 OR-Tools 定的景点顺序与坐标，ITINERARY_SYS 已要求 LLM「不改变景点顺序与分天，只填软字段并按需插入餐饮/交通」。测试用 fake structured LLM，不验证 LLM 是否真守约（那是 prompt 行为，端到端测试覆盖）。
+
 - [ ] **Step 4: 运行确认通过**
 
 Run: `uv run pytest tests/agent/test_tools.py -k "assemble or assign" -v`
-Expected: PASS（2 passed）
+Expected: PASS（3 passed）
+
+注：`test_assemble_itinerary_runs_ortools_pipeline` 会真实跑 OR-Tools 求解（2 个景点 1 天）+ haversine 降级距离（fake_amap 的 distance_batch 未配则走 haversine）。若求解或 matrix 报错，检查 nodes 构造（depot+candidates）与 duration_matrix 调用。
 
 - [ ] **Step 5: 提交**
 
 ```bash
 git add app/agent/tools.py tests/agent/test_tools.py
-git commit -m "feat(react): 编排类工具 assemble_itinerary/assign_hotels"
+git commit -m "feat(react): assemble_itinerary(OR-Tools管线)+assign_hotels 工具"
 ```
-
----
 
 ## Task 8: 工具层 — 核算 / ask_user / finalize_plan
 
