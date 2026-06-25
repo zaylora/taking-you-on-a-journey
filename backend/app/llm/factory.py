@@ -12,6 +12,7 @@ def build_llm(provider: str | None = None, **overrides) -> BaseChatModel:
     s = get_settings()
     provider = provider or s.llm_provider
     disable_streaming = overrides.pop("disable_streaming", "tool_calling")
+    max_retries = overrides.pop("max_retries", s.llm_max_retries)
 
     if provider == "openai":
         return init_chat_model(
@@ -21,6 +22,7 @@ def build_llm(provider: str | None = None, **overrides) -> BaseChatModel:
             base_url=s.openai_base_url,
             temperature=overrides.pop("temperature", s.temperature),
             disable_streaming=disable_streaming,
+            max_retries=max_retries,
             **overrides,
         )
 
@@ -32,6 +34,7 @@ def build_llm(provider: str | None = None, **overrides) -> BaseChatModel:
             base_url=s.anthropic_base_url,
             temperature=overrides.pop("temperature", s.temperature),
             disable_streaming=disable_streaming,
+            max_retries=max_retries,
             **overrides,
         )
 

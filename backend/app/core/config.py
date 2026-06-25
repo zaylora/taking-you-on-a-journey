@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 
     temperature: float = 0.0
 
+    # LLM 请求重试次数：中转上游偶发 502/超时时自动退避重试（SDK 默认仅 2 次）。
+    llm_max_retries: int = 5
+
     # 高德 Web 服务（后端代理，Key 不下发前端）
     amap_web_key: SecretStr = SecretStr("")
 

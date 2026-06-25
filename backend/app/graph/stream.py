@@ -3,8 +3,11 @@
 token 仅放行 metadata.langgraph_node=="summarize"。
 """
 import json
+import logging
 
 from langgraph.types import Command
+
+logger = logging.getLogger(__name__)
 
 from app.core.constants import (
     EVENT_SESSION, EVENT_NODE_START, EVENT_TOKEN, EVENT_NODE_END,
@@ -86,5 +89,6 @@ async def sse_events(message: str, thread_id: str | None, request):
             })
             if title and updated:
                 yield _sse(EVENT_TITLE, {"thread_id": thread_id, "title": updated["title"]})
-    except Exception:  # noqa: BLE001 —— 脱敏：不泄露 Key/堆栈
+    except Exception:  # noqa: BLE001 —— 前端脱敏：不泄露 Key/堆栈；但服务端必须留真因
+        logger.exception("sse_events 处理失败 thread_id=%s", thread_id)
         yield _sse(EVENT_ERROR, {"message": "生成失败，请重试"})
