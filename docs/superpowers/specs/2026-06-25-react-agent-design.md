@@ -2,12 +2,12 @@
 
 - 日期：2026-06-25
 - 里程碑：ReAct（把固定编排图重构为全局单 Agent ReAct 循环）
-- 范围：后端 `app/graph` 从「16 节点固定编排图」重构为「单一 ReAct Agent（LLM 推理循环）+ 一组确定性 tools」；保留 clarify 中断、summarize 流式、plan_patch 增量更新三项对前端的硬契约；前端按需小幅调整
+- 范围：后端 `app/graph` 从「16 节点固定编排图」重构为「单一 ReAct Agent（LLM 推理循环）+ 一组确定性 tools」；保留 clarify 中断、最终攻略流式（独立 `compose_guide` 节点）、plan_patch 增量更新三项对前端的硬契约；前端按需小幅调整
 - 验收标准：
   1. 用户的规划/修改/问答请求全部由**一个** ReAct Agent 处理，由 LLM 自主决定调用哪些工具、调用几次、何时收尾，不再有编译期写死的意图分流与节点路由。
   2. 费用核算（人均/整间口径）、超支判定、分天聚类、过夜日判定、`changed_days` 计算等**确定性业务规则**结果与重构前一致（回归测试保证）。
   3. 信息不足时 LLM **自主**调用 `ask_user` 提问并暂停，前端 `clarify` 弹窗交互不变；信息充分时 LLM 直接规划、不提问。
-  4. 最终攻略仍由独立 `summarize` 节点逐 token 流式输出，前端打字机效果不变。
+  4. 最终攻略仍由独立 `compose_guide` 节点逐 token 流式输出，前端打字机效果不变。
   5. plan 改动后前端地图仍能按 `changed_days` + `plan_version` 增量重绘。
 
 ## 决策摘要
@@ -19,7 +19,7 @@
 | 业务规则归属 | 包成 tools，确定性纯函数保留 | LLM 决定「调哪个/几次/何时停」，但费用/聚类/过夜/diff 算法是 tool 内部纯函数，LLM 改不了 |
 | 澄清提问 | `ask_user` 作为普通 tool，LLM 自主决定是否调用（决策点 B） | 取消固定 clarify 前置关卡；`interrupt()` 仅作「提问」动作的暂停机制 |
 | changed_days | `finalize_plan` 内部新旧 day_plans 逐天 diff 自动计算（决策点 A） | 对 LLM 透明，前端增量重绘契约不变 |
-| 最终攻略 | Agent 只产结构化 day_plans，收尾后独立 summarize 流式（决策点 C） | `stream.py` 的 `langgraph_node=="summarize"` token 放行逻辑零改动 |
+| 最终攻略 | Agent 只产结构化 day_plans，收尾后独立 `compose_guide` 节点流式（决策点 C） | 节点名是 token 过滤锚点；agent 决策与攻略 token 同节点无法分离（官方 gap），故必须独立节点 |
 | 前端 | 默认尽量少改，仅在 ReAct 收益明确处调整 | 用户已同意「可重构前端」，但本设计优先复用既有 SSE 事件契约 |
 | 持久化 | 沿用既有 checkpointer（SQLite / MemorySaver） | thread_id + interrupt/resume 机制不变 |
 
@@ -38,7 +38,7 @@ START → memory → dispatch_agent ─┬─ plan_new → reset → clarify ⟲
                                   ├─ refine → refine ──→ (按需重排)
                                   └─ qa    → answer
                                                         ↓
-                                                    summarize → memory_update → END
+                                                    compose_guide → memory_update → END
 ```
 
 关键特征（重构需逐一对齐）：
@@ -63,7 +63,7 @@ ReAct 的价值正在于：LLM 在 Reason→Act→Observe 循环里**自主**应
 这些不是「流程死板」，是和前端/业务的硬约束，重构时**必须**对齐：
 
 1. **clarify 的 `interrupt()` 暂停/resume**：前端靠 `EVENT_CLARIFY` 弹问题、`Command(resume=...)` 续跑（见 `stream.py:41,58-60`）。
-2. **summarize 逐 token 流式**：`stream.py:49` 只放行 `metadata.langgraph_node=="summarize"` 的 token 做打字机效果。
+2. **最终攻略逐 token 流式**：`stream.py:49` 只放行 `metadata.langgraph_node==<攻略节点>` 的 token 做打字机效果（旧 `summarize`，重构后改名 `compose_guide`）。
 3. **`EVENT_PLAN_PATCH` + `changed_days` + `plan_version`**：前端地图据此局部增量重绘（`stream.py:68-69`）。
 4. **确定性业务规则**：费用人均/整间口径（`budget._sum_costs`）、超支回退（`compute_budget`，`_MAX_RETRY=2`）、分天聚类（`itinerary.cluster_by_day`）、过夜日（`accommodation.overnight_days`）。这些是 M4/M5 反复修过的，回归风险最高。
 
@@ -89,17 +89,19 @@ START → context_prep (pre-hook: 装配 memory/会话上下文)
    │                                  changed_days + plan_version)│
    └────────────────────────────────────────────────────────┘
           ↓ (agent 结束循环)
-   summarize (逐 token 流式，前端打字机契约不变)
+   compose_guide (逐 token 流式，前端打字机契约不变；复用旧 summarize 实现+改名)
           ↓
    memory_update → END
 ```
 
-外层仍是一个极简的 LangGraph 图：`context_prep → trip_agent → summarize → memory_update`。`trip_agent` 是这张图里的一个**子图节点**（`create_agent` 返回的 compiled graph），承载全部决策。`summarize` / `memory_update` 沿用现有实现。
+外层仍是一个极简的 LangGraph 图：`context_prep → trip_agent → compose_guide → memory_update`。`trip_agent` 是这张图里的一个**子图节点**（`create_agent` 返回的 compiled graph），承载全部决策。`compose_guide`（复用旧 `summarize.py` 逻辑、改名）/ `memory_update` 沿用现有实现。
 
 ### 2.2 为什么外层还留一张图，而不是纯 agent
 
-- **流式契约**：summarize 必须是独立节点，token 才能按 `langgraph_node=="summarize"` 被 `stream.py` 放行。若让 agent 自己写攻略，token 元数据是 agent 内部节点名，前端打字机会失效（C 决策）。
-- **职责隔离**：agent 专注「规划决策 + 产结构化 day_plans」；攻略文案渲染是确定性收尾，不该占用 agent 的推理预算，也避免 agent 把长文案塞进 tool-calling 上下文。
+- **流式契约（C 决策的技术根因）**：最终攻略由一个**独立节点** `compose_guide` 写出并流式，token 按 `langgraph_node=="compose_guide"` 被 `stream.py` 放行。
+  - 为什么不让 agent 在循环里自己写攻略：在 `create_agent` 中，「判断要不要调工具」和「写最终回复」是**同一个 model 节点**，两者 token 的 `langgraph_node` 元数据**完全相同**，无法靠节点名分离 agent 的中间预备文本（如「我先查天气…」）与最终攻略。这是 LangChain 官方已知 gap（Issue #34491，截至 2025 末仍是未内置的 feature request）。靠 `tool_calls`/`finish_reason` 过滤实测仍漏中间文本，不可靠。
+  - 故采用「agent 只决策产 `day_plans` → 收尾独立节点写攻略」的结构：节点名是干净、确定的过滤锚点，前端打字机零改动。本质同原 `summarize`，但在 ReAct 下改名 `compose_guide`（语义：把结构化行程撰写成攻略），命名反映新架构。
+- **职责隔离**：agent 专注「规划决策 + 产结构化 day_plans」；攻略文案渲染是收尾，不占用 agent 推理预算，也避免 agent 把长文案塞进 tool-calling 上下文、污染下一轮。
 - **中断点清晰**：`ask_user` 的 `interrupt()` 发生在 agent 子图内，外层 `stream.py` 流后探测 `snap.tasks[].interrupts` 的逻辑无需改动。
 
 ### 2.3 model / create_agent 落地形态
@@ -188,7 +190,7 @@ trip_agent = create_agent(
     Act: compute_budget(...) → Observe 未超支
     Act: finalize_plan(day_plans) → 写 state + changed_days=[1,2,3]
     收尾（无更多 tool_call）
-→ summarize 逐 token 流式攻略
+→ compose_guide 逐 token 流式攻略
 → memory_update → END
 → stream.py 发 EVENT_PLAN_PATCH(changed_days=[1,2,3]) + EVENT_FINAL
 ```
@@ -204,12 +206,12 @@ def build_graph(checkpointer=None):
     g = StateGraph(TripState)
     g.add_node("context_prep", context_prep)      # = 现 memory 节点（改名或沿用）
     g.add_node("trip_agent", trip_agent)          # create_agent 返回的子图
-    g.add_node("summarize", summarize)            # 沿用
+    g.add_node("compose_guide", compose_guide)    # 复用旧 summarize 逻辑，改名
     g.add_node("memory_update", memory_update)    # 沿用
     g.add_edge(START, "context_prep")
     g.add_edge("context_prep", "trip_agent")
-    g.add_edge("trip_agent", "summarize")
-    g.add_edge("summarize", "memory_update")
+    g.add_edge("trip_agent", "compose_guide")
+    g.add_edge("compose_guide", "memory_update")
     g.add_edge("memory_update", END)
     return g.compile(checkpointer=checkpointer or MemorySaver())
 ```
@@ -219,8 +221,8 @@ def build_graph(checkpointer=None):
 ### 5.2 stream.py 改动评估
 
 - `EVENT_CLARIFY` 探测（流后 `snap.tasks[].interrupts`）：**不变**，前提是子图 interrupt 正确冒泡（§5.1 验证项）。
-- token 放行 `langgraph_node=="summarize"`：**不变**。
-- `EVENT_NODE_START/END` 的 `NODES` / `NODE_LABELS`：需更新——节点集合从 16 个变为 `context_prep/trip_agent/summarize/memory_update`。agent 内部 tool 调用是否要发进度事件（如「正在检索景点」）是**可选增强**，非必须。
+- token 放行：判断键从 `langgraph_node=="summarize"` 改为 `=="compose_guide"`（仅常量名变化，逻辑不变）。
+- `EVENT_NODE_START/END` 的 `NODES` / `NODE_LABELS`：需更新——节点集合从 16 个变为 `context_prep/trip_agent/compose_guide/memory_update`。agent 内部 tool 调用是否要发进度事件（如「正在检索景点」）是**可选增强**，非必须。
 - `EVENT_PLAN_PATCH` / `EVENT_FINAL`：**不变**，仍读 `snap.values` 的 `day_plans/changed_days/plan_version/summary`。
 
 ### 5.3 前端改动评估
@@ -231,8 +233,8 @@ def build_graph(checkpointer=None):
 ## 6. 错误处理与降级
 
 - 单个检索 tool 失败：内部已降级（空列表/季节气候），返回给 agent，LLM 据此决策（如换关键词重试或继续）。
-- agent 循环不收敛 / 超 `recursion_limit`：`create_agent` 的 `remaining_steps` 机制会返回「需要更多步骤」的兜底 AIMessage，不抛 `GraphRecursionError`；需设置合理上限并在 summarize 给出友好提示。
-- LLM 不调 `finalize_plan` 就结束：summarize 仍能基于 state 里既有 day_plans（可能为空）输出建议性文案，对齐现有「无 day_plans 走需求建议」分支（`summarize.py:13-16`）。
+- agent 循环不收敛 / 超 `recursion_limit`：`create_agent` 的 `remaining_steps` 机制会返回「需要更多步骤」的兜底 AIMessage，不抛 `GraphRecursionError`；需设置合理上限并在 compose_guide 给出友好提示。
+- LLM 不调 `finalize_plan` 就结束：compose_guide 仍能基于 state 里既有 day_plans（可能为空）输出建议性文案，对齐现有「无 day_plans 走需求建议」分支（旧 `summarize.py:13-16` 逻辑）。
 - 顶层异常：`stream.py` 现有 `except` 脱敏返回「生成失败，请重试」，**不变**。
 
 ## 7. 测试策略
@@ -257,7 +259,7 @@ def build_graph(checkpointer=None):
 
 ### 7.4 流式契约
 
-- summarize token 逐字冒泡（沿用 M1 实测方式）。
+- compose_guide token 逐字冒泡（沿用 M1 实测方式，校验放行键已切到 `compose_guide`）。
 - interrupt 暂停时流干净结束 + `EVENT_CLARIFY` 正确发出（沿用现有探针测试）。
 
 ## 8. 不做（YAGNI）
@@ -265,7 +267,7 @@ def build_graph(checkpointer=None):
 - 不引入多 Agent / supervisor（用户明确要全局**单** Agent）。
 - 不重写前端交互范式（默认尽量少改；clarify/打字机/地图契约保留）。
 - 不改持久化方案（沿用 checkpointer）。
-- 不把攻略文案生成塞进 agent（保留独立 summarize）。
+- 不把攻略文案生成塞进 agent（保留独立 `compose_guide` 节点；技术根因见 §2.2：决策与攻略 token 同节点无法分离）。
 - 不引入 LangGraph middleware 的高级特性（PII/guardrails 等），除非验证 `create_agent` 的 HITL 必须经 middleware 才能 interrupt。
 
 > 注：死代码删除（§11）属于本次范围内的收尾工作，不是 YAGNI 排除项——用户明确要求重构后保证代码简洁、不留兼容占位。
@@ -306,7 +308,7 @@ def build_graph(checkpointer=None):
 | `graph/nodes/retrieve.py` | 删 | fan-out 锚点不再需要（检索改 tool 按需调） |
 | `graph/nodes/refine.py` | 删 | 局部修改由 ReAct + assemble/finalize 取代；`RefineRequest`/各 `_*_day` 助手废弃 |
 | `graph/nodes/routing.py` | 删 | `route_after_plan`/`route_after_accommodation` 规则路由废弃（路由权交 LLM） |
-| `graph/nodes/answer.py` | 删 | QA 由 ReAct 循环（不调 finalize_plan）+ summarize 取代 |
+| `graph/nodes/answer.py` | 删 | QA 由 ReAct 循环（不调 finalize_plan）+ compose_guide 取代 |
 | `graph/nodes/weather.py` / `attractions.py` / `restaurants.py` / `transport.py` | 删 | 4 个检索节点逻辑并入对应检索 tool（tool 直接调 `amap.*`） |
 
 ### 11.2 纯函数迁出后删文件
@@ -323,7 +325,7 @@ def build_graph(checkpointer=None):
 |---|---|
 | `graph/nodes/memory.py` | 并入 `context_prep`（可改名）；逻辑保留 |
 | `graph/nodes/memory_update.py` | **改写** receipt：`_assistant_receipt` 不再读 `last_intent`/`normalized_req`，改为基于 `changed_days`/`day_plans` 是否存在推断文案 |
-| `graph/nodes/summarize.py` | 沿用，零改动 |
+| `graph/nodes/summarize.py` | **重命名**为 `compose_guide.py`：逻辑复用（按 day_plans 流式写攻略），函数/节点名改为 `compose_guide`，prompt 可微调适配 ReAct 产出；无 day_plans 兜底分支保留 |
 | `graph/state.py` | 瘦身：删 §4.1 列出的废弃字段 |
 | `graph/builder.py` | 重写为 §5.1 四节点外层图 |
 | `graph/stream.py` | 改 §5.2：节点集合更新；契约事件不动 |
