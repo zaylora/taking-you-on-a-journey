@@ -7,7 +7,7 @@
   1. 用户的规划/修改/问答请求全部由**一个** ReAct Agent 处理，由 LLM 自主决定调用哪些工具、调用几次、何时收尾，不再有编译期写死的意图分流、节点路由与外围包裹节点。
   2. 费用核算（人均/整间口径）、超支判定、分天聚类、过夜日判定、`changed_days` 计算等**确定性业务规则**结果与重构前一致（回归测试保证）。
   3. 信息不足时 LLM **自主**调用 `ask_user` 提问并暂停，前端 `clarify` 弹窗交互不变；信息充分时 LLM 直接规划、不提问。
-  4. 最终回复（规划攻略 / QA 答案）由 **agent 本体**逐 token 流式输出，前端打字机效果不变。
+  4. 最终回复（规划攻略 / QA 答案）由 **agent 本体**逐 token 流式输出，前端打字机效果不变；agent 中间自然语言文本（思考/说明）也一并流出（用户接受可见），仅工具原始 JSON 不流。
   5. plan 改动后前端地图仍能按 `changed_days` + `plan_version` 增量重绘。
 
 ## 决策摘要
@@ -19,7 +19,7 @@
 | 业务规则归属 | 包成 tools，确定性纯函数保留 | LLM 决定「调哪个/几次/何时停」，但费用/聚类/过夜/diff 算法是 tool 内纯函数，LLM 改不了 |
 | 澄清提问 | `ask_user` 作为普通 tool，LLM 自主决定是否调用（决策 B） | 取消固定 clarify 前置关卡；`interrupt()` 仅作「提问」动作的暂停机制 |
 | changed_days | `finalize_plan` 内部新旧 day_plans 逐天 diff 自动计算（决策 A） | 对 LLM 透明，前端增量重绘契约不变 |
-| 最终回复 | agent 本体输出（规划攻略 / QA 答案统一）（决策 C） | 不引入收尾节点；流式过滤方案见 §2.3，Task 0 实测落地 |
+| 最终回复 | agent 本体输出（规划攻略 / QA 答案统一），中间文本可见（决策 C） | 不引入收尾节点；流式放行 model 文本 token、不流工具原始 JSON（§2.3），规则极简无需实测过滤 |
 | 上下文 / 消息历史 | 全靠 `create_agent` + checkpointer 的 `messages` | 取代原 `memory`（装配上下文）与 `memory_update`（追加消息）两个节点，二者删除 |
 | 前端 | 默认尽量少改，仅在 ReAct 收益明确处调整 | 用户已同意「可重构前端」，但本设计优先复用既有 SSE 事件契约 |
 | 持久化 | 沿用既有 checkpointer（SQLite / MemorySaver） | thread_id + interrupt/resume 机制不变 |
@@ -65,7 +65,7 @@ ReAct 的价值正在于：LLM 在 Reason→Act→Observe 循环里**自主**应
 这些不是「流程死板」，是和前端/业务的硬约束，重构时**必须**对齐：
 
 1. **clarify 的 `interrupt()` 暂停/resume**：前端靠 `EVENT_CLARIFY` 弹问题、`Command(resume=...)` 续跑（见 `stream.py:41,58-60`）。
-2. **最终回复逐 token 流式**：`stream.py:49` 现按 `metadata.langgraph_node=="summarize"` 放行 token 做打字机效果。重构后由 agent 本体输出，过滤方案见 §2.3。
+2. **最终回复逐 token 流式**：`stream.py:49` 现按 `metadata.langgraph_node=="summarize"` 放行 token 做打字机效果。重构后由 agent 本体输出，改为放行所有 `on_chat_model_stream` 文本 token（中间文本+最终回复，§2.3），工具原始 JSON 不走该事件、天然不流。
 3. **`EVENT_PLAN_PATCH` + `changed_days` + `plan_version`**：前端地图据此局部增量重绘（`stream.py:68-69`）。
 4. **确定性业务规则**：费用人均/整间口径（`budget._sum_costs`）、超支回退（`compute_budget`，`_MAX_RETRY=2`）、分天聚类（`itinerary.cluster_by_day`）、过夜日（`accommodation.overnight_days`）。这些是 M4/M5 反复修过的，回归风险最高。
 5. **API 契约**：`main.py:50` 用 `build_graph(checkpointer=...)` 得到 `app.state.graph`；`stream.py` 用 `graph.astream_events` / `aget_state`。`build_graph` 重构后**签名不变**（仍收 checkpointer、仍返回 compiled graph），`main.py` 零改动。
@@ -105,18 +105,24 @@ START → trip_agent (create_agent ReAct 循环) → END
 - 当前行程：`day_plans` 等仍在 state，agent 可在 prompt/tool 读到；修改类请求基于既有 `day_plans` 增量改（见 §3.5）。
 - resume：`ask_user` 的 `interrupt()` 暂停后，`Command(resume=...)` 续跑，checkpointer 保证状态连续（机制同现状）。
 
-### 2.3 最终回复的输出与流式（决策 C：agent 本体输出）
+### 2.3 最终回复的输出与流式（决策 C：agent 本体输出，中间文本可见）
 
-最终回复（规划攻略 / QA 答案）由 **agent 本体**在循环最后一轮（无 tool_call）输出，规划与 QA 统一，不引入收尾节点。
+最终回复（规划攻略 / QA 答案）由 **agent 本体**输出，规划与 QA 统一，不引入收尾节点。
 
-难点：agent「工具决策轮」与「最终回复轮」是同一 model 节点，token 的 `langgraph_node` 相同，无法靠节点名分离（LangChain 已知 gap，Issue #34491，2025 末仍 open）。落地靠两点：
+**用户决策：agent 的中间自然语言文本（思考、说明，如「我先查一下天气…」）可以冒出来给用户看。** 这消除了「区分中间文本 vs 最终回复」的难题——既然两者都放行，就不需要按 tag / `disable_streaming` 精密分离，也无需 Task 0 实测过滤准确率。
 
-1. **`disable_streaming="tool_calling"`（`build_llm` 默认值，factory.py:14）**：模型做 tool-calling 的轮次不流式，只有生成不含 tool_call 的最终回复才流 token——从源头让中间决策轮不吐 token。
-2. **`stream.py` 在 `on_chat_model_stream` 里按需过滤**：结合上面的天然过滤 + 必要时给最终回复 model 调用挂 tag（如 `final_answer`）按 `tags`/`name` 放行。
+**流式过滤规则极简**：放行 **model 节点**产出的文本 token（中间思考 + 最终攻略/答案都流），**挡掉 tools 节点**的原始输出（高德 POI 的大段 JSON、tool_call 函数名+参数）——否则聊天框会出现乱码/代码。判定即：
 
-> 子图事件冒泡：`create_agent` 即 compiled graph，其内部 model 节点的 `on_chat_model_stream` 事件正常出现在 `astream_events` 流中。
+```
+on_chat_model_stream 且 metadata.langgraph_node != "tools" → 放行该 token
+```
 
-**Task 0 必须实测**：`disable_streaming="tool_calling"`（必要时叠加 tag）能否 100% 挡住 agent 调工具前偶发的中间预备文本（「我查一下…」）。Anthropic 模型 tool-calling 时 content 常为空，有利；若实测漏文本且压不住，再与用户商定退路（例如约束系统提示让中间轮不产出自然语言，或最小化引入一个收尾节点）——不在本 spec 预设收尾节点。
+（`create_agent` 中产出文本的是 model 节点，tools 节点只产 ToolMessage，本就不发 `on_chat_model_stream`；该判定主要是兜底/语义明确。实际只需放行 `on_chat_model_stream` 的文本 token 即可，工具的原始 JSON 不走该事件。）
+
+- **`disable_streaming`**：`build_llm` 当前默认 `"tool_calling"`（factory.py:14），会抑制 tool-calling 轮的流式。本方案需中间文本也流出，故 agent 的 model **改为正常流式**（构造时传 `disable_streaming=False` 或等价）。Task 0 确认该 override 不影响 tool-calling 正确性。
+- **职责自适应**：agent 改了行程（调过 `finalize_plan`）就在收尾文本里写逐日攻略；纯 QA（未改行程）就直接答问题，不套攻略模板。
+
+> 子图事件冒泡：`create_agent` 即 compiled graph，其内部 model 节点的 `on_chat_model_stream` 事件正常出现在 `astream_events` 流中。`summary`（`EVENT_FINAL` 用）从 agent 末条 AIMessage 取。
 
 ### 2.4 create_agent 落地形态
 
@@ -221,7 +227,7 @@ def build_graph(checkpointer=None):
 ### 5.2 stream.py 改动
 
 - `EVENT_CLARIFY` 探测（流后 `snap.tasks[].interrupts`）：**逻辑不变**，确认 `create_agent` 的 interrupt 出现在 `aget_state().tasks`（Task 0）。
-- token 放行（**主要改动**）：从「`langgraph_node=="summarize"`」改为 §2.3 的过滤（`disable_streaming` 天然过滤，必要时叠加 `final_answer` tag 按 `tags`/`name` 放行）。
+- token 放行（**主要改动**）：从「`langgraph_node=="summarize"`」改为「放行所有 `on_chat_model_stream` 文本 token」（§2.3：中间思考 + 最终回复都流，工具原始 JSON 不走该事件天然不流）。同时 agent 的 model 关闭 `disable_streaming`（改正常流式）以让中间文本也能流出。
 - `summary`：从 `snap.values["messages"][-1].content` 取最终回复文本，供 `EVENT_FINAL`。
 - `EVENT_NODE_START/END` 的 `NODES` / `NODE_LABELS`：节点集合大幅缩减（仅 agent 内部 `model`/`tools` 节点）。进度展示策略改为「按 tool 调用名报进度」（可选增强）或简化为「思考中/生成中」。
 - `EVENT_PLAN_PATCH` / `EVENT_FINAL`：**不变**，仍读 `snap.values` 的 `day_plans/changed_days/plan_version` + 上面取的 `summary`。
@@ -262,7 +268,7 @@ def build_graph(checkpointer=None):
 
 ### 7.4 流式契约
 
-- 最终回复 token 逐字冒泡，且**无中间决策文本泄漏**（Task 0 + 端到端校验 §2.3 过滤）。
+- 文本 token 逐字冒泡（中间思考 + 最终回复都流），工具原始 JSON **不**出现在 token 流里。
 - interrupt 暂停时流干净结束 + `EVENT_CLARIFY` 正确发出（沿用现有探针测试）。
 
 ## 8. 不做（YAGNI）
@@ -281,7 +287,7 @@ def build_graph(checkpointer=None):
 |---|---|
 | `create_agent` interrupt 不在 `aget_state().tasks` → ask_user/clarify 失效 | Task 0 真实环境验证；不行则用 middleware HITL 或自定义中断转发 |
 | `create_agent` 默认 state 仅 messages，业务字段无处放 | Task 0 确认自定义 `state_schema` / `InjectedState` / `Command` 机制 |
-| 中间决策文本泄漏到前端打字机 | §2.3 `disable_streaming` + tag；Task 0 实测，漏则与用户商定退路 |
+| 工具原始 JSON 误流到聊天框 | 只放行 `on_chat_model_stream` 文本 token，工具 ToolMessage 不走该事件（§2.3）；端到端校验 |
 | LLM 不调确定性 tool、自己瞎算费用/分天 → 业务回归 | 系统提示强约束「费用/分天/过夜必须调对应 tool」；端到端测试卡口 |
 | `create_agent` 版本/bug（prebuilt 1.0.5） | Task 0 验证 + 必要时锁版本 |
 | checkpointer 老状态字段不兼容（已直接删字段） | Task 0 实测反序列化；TypedDict 多余键通常忽略；炸则清洗或丢弃测试期老会话 |
@@ -289,7 +295,7 @@ def build_graph(checkpointer=None):
 
 ## 10. 实现顺序（交 writing-plans 细化）
 
-0. **Task 0 真实环境验证**：`create_agent` import/签名/checkpointer/interrupt 冒泡/自定义 state_schema/版本 bug/老会话反序列化/§2.3 流式过滤实测。任一关键项不通过 → 回报用户调整 spec。
+0. **Task 0 真实环境验证**：`create_agent` import/签名/checkpointer/interrupt 冒泡/自定义 state_schema/版本 bug/老会话反序列化；确认关闭 `disable_streaming` 后 tool-calling 仍正确、`on_chat_model_stream` 文本 token 正常冒泡且工具 JSON 不混入。任一关键项不通过 → 回报用户调整 spec。
 1. 抽确定性纯函数为独立可测单元（迁入 `tools/` 或 `core/`；`diff_changed_days` 新增；聚类/预算/过夜复用）。
 2. 实现工具层（检索/编排/核算/ask_user/finalize_plan）+ 单测。
 3. 组装 `build_graph` = `create_agent`（系统提示 + tools + state_schema + checkpointer）。
