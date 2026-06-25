@@ -173,81 +173,316 @@ git commit -m "feat(react): diff_changed_days 纯函数 + 单测"
 
 ---
 
-## Task 2: 迁移规划纯函数与 schema 到 `planning.py`
+## Task 2: OR-Tools 依赖 + 高德距离矩阵接口（含 SQLite 缓存）
 
-把 `itinerary.py` 的纯函数与 Pydantic schema 原样迁入新模块（不改算法），让工具层依赖新模块、为后续删除旧节点铺路。
+行程规划改用 OR-Tools VRPTW，需真实街道行驶时间矩阵。本任务加 `ortools` 依赖，并在 `amap.py` 加距离接口、在新模块实现「批量距离矩阵 + SQLite 缓存 + haversine 降级」。
 
 **Files:**
-- Create: `app/agent/planning.py`
-- Test: `tests/agent/test_planning.py`
+- Modify: `backend/pyproject.toml`（加 `ortools>=9.0`）
+- Modify: `app/tools/amap.py`（加 `distance_batch`）
+- Create: `app/agent/matrix.py`（距离矩阵 + 缓存 + haversine 降级）
+- Test: `tests/agent/test_matrix.py`
 
 **Interfaces:**
-- Consumes: 无（自包含）
+- Consumes: 无（自包含 + amap）
 - Produces:
-  - `cluster_by_day(points: list[dict], days: int) -> list[list[dict]]`（贪心顺路分天，算法与 `itinerary.cluster_by_day` 逐字节一致）
-  - `daily_centers_of(clusters: list[list[dict]]) -> list[dict]` — 每簇质心 `{lng,lat}`（提炼自 itinerary 节点内联逻辑）
-  - Pydantic schema：`Location` / `DayWeather` / `PlanItem` / `Hotel` / `DayPlan` / `DayPlans`
-  - `ITINERARY_SYS: str` — 编排系统提示
+  - `amap.distance_batch(origins: list[str], destination: str, type_: str = "1") -> list[dict]` — 调 `/v3/distance`，origins 为 `"lng,lat"` 列表（≤100），返回 `[{origin_id,dest_id,distance,duration}]`；失败返回 `[]`。
+  - `matrix.haversine_seconds(a: dict, b: dict, kmh: float = 30.0) -> float` — 直线距离估行驶秒数（降级用）。
+  - `matrix.duration_matrix(nodes: list[dict], db_path: str, use_amap: bool = True) -> list[list[float]]` — N×N 行驶秒矩阵；优先查 SQLite 缓存→缺的调 amap→失败 haversine 降级；对角线 0。`nodes` 每项含 `poi_id/lng/lat`。
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: 加 ortools 依赖**
+
+Modify `backend/pyproject.toml`：在 `dependencies` 列表加一行 `"ortools>=9.0",`（放在 `langgraph-checkpoint-sqlite` 后）。
+
+Run: `uv add "ortools>=9.0"` （或手动加后 `uv lock`）。若 `uv add` 因锁失败，手动 Edit pyproject 后 `uv lock`，再 `uv sync`。
+Run: `uv run python -c "from ortools.constraint_solver import pywrapcp; print('ortools OK')"`
+Expected: `ortools OK`
+
+- [ ] **Step 2: 写失败测试**
+
+Create `tests/agent/test_matrix.py`:
+
+```python
+import pytest
+
+from app.agent import matrix
+
+
+def test_haversine_seconds_zero_for_same_point():
+    p = {"lng": 104.06, "lat": 30.65}
+    assert matrix.haversine_seconds(p, p) == 0.0
+
+
+def test_haversine_seconds_positive_for_distinct():
+    a = {"lng": 104.06, "lat": 30.65}
+    b = {"lng": 104.10, "lat": 30.70}
+    assert matrix.haversine_seconds(a, b) > 0
+
+
+@pytest.mark.asyncio
+async def test_duration_matrix_haversine_fallback(tmp_path):
+    nodes = [
+        {"poi_id": "a", "lng": 104.0, "lat": 30.6},
+        {"poi_id": "b", "lng": 104.1, "lat": 30.7},
+    ]
+    db = str(tmp_path / "dist.sqlite")
+    m = await matrix.duration_matrix(nodes, db, use_amap=False)
+    assert len(m) == 2 and len(m[0]) == 2
+    assert m[0][0] == 0.0 and m[1][1] == 0.0
+    assert m[0][1] > 0 and m[1][0] > 0
+
+
+@pytest.mark.asyncio
+async def test_duration_matrix_uses_cache_second_call(tmp_path, monkeypatch):
+    calls = {"n": 0}
+
+    async def _fake_batch(origins, destination, type_="1"):
+        calls["n"] += 1
+        return [{"origin_id": i + 1, "dest_id": 1, "distance": 1000, "duration": 600}
+                for i in range(len(origins))]
+
+    monkeypatch.setattr("app.tools.amap.distance_batch", _fake_batch)
+    nodes = [{"poi_id": "a", "lng": 104.0, "lat": 30.6},
+             {"poi_id": "b", "lng": 104.1, "lat": 30.7}]
+    db = str(tmp_path / "dist.sqlite")
+    await matrix.duration_matrix(nodes, db, use_amap=True)
+    first = calls["n"]
+    await matrix.duration_matrix(nodes, db, use_amap=True)  # 第二次应命中缓存
+    assert calls["n"] == first  # 缓存命中，无新增 amap 调用
+```
+
+- [ ] **Step 2b: 运行确认失败**
+
+Run: `uv run pytest tests/agent/test_matrix.py -v`
+Expected: FAIL，`ModuleNotFoundError: app.agent.matrix` 或 `amap has no attribute distance_batch`
+
+- [ ] **Step 3: 实现 amap.distance_batch**
+
+在 `app/tools/amap.py` 末尾追加（仿现有 `search_poi` 风格，含 `@traceable`、5s 超时、失败降级）：
+
+```python
+@traceable(run_type="tool", name="amap_distance_batch")
+async def distance_batch(origins: list[str], destination: str, type_: str = "1") -> list[dict]:
+    """批量距离：origins(≤100 个 "lng,lat") → destination。返回 [{origin_id,dest_id,distance,duration}]；失败 []。"""
+    if not origins or not destination:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(f"{_BASE}/distance", params={
+                "key": _key(), "origins": "|".join(origins),
+                "destination": destination, "type": type_,
+            })
+            r.raise_for_status()
+            data = r.json()
+        out = []
+        for it in data.get("results", []) or []:
+            out.append({
+                "origin_id": int(it.get("origin_id", 0)),
+                "dest_id": int(it.get("dest_id", 1)),
+                "distance": float(it.get("distance", 0) or 0),
+                "duration": float(it.get("duration", 0) or 0),
+            })
+        return out
+    except Exception:  # noqa: BLE001 —— 降级
+        return []
+```
+
+- [ ] **Step 4: 实现 matrix.py**
+
+Create `app/agent/matrix.py`:
+
+```python
+# -*- coding: utf-8 -*-
+"""行驶时间矩阵：高德 /v3/distance 真实街道时间 + SQLite 缓存 + haversine 降级。
+
+供 OR-Tools VRPTW 求解器消费。缓存用独立 SQLite 文件（与 checkpointer 分离，避免写锁冲突）。
+"""
+import math
+import sqlite3
+
+from app.tools import amap
+
+_EARTH_KM = 6371.0
+
+
+def haversine_km(a: dict, b: dict) -> float:
+    lat1, lng1 = math.radians(a.get("lat", 0.0)), math.radians(a.get("lng", 0.0))
+    lat2, lng2 = math.radians(b.get("lat", 0.0)), math.radians(b.get("lng", 0.0))
+    dlat, dlng = lat2 - lat1, lng2 - lng1
+    h = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlng / 2) ** 2
+    return 2 * _EARTH_KM * math.asin(math.sqrt(h))
+
+
+def haversine_seconds(a: dict, b: dict, kmh: float = 30.0) -> float:
+    """直线距离估行驶秒数（降级用）。同点 0。"""
+    km = haversine_km(a, b)
+    return round(km / max(1e-6, kmh) * 3600, 1)
+
+
+def _ensure_cache(db_path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(db_path, check_same_thread=False)
+    conn.execute("CREATE TABLE IF NOT EXISTS dist (o TEXT, d TEXT, t TEXT, dur REAL, PRIMARY KEY(o,d,t))")
+    conn.commit()
+    return conn
+
+
+async def duration_matrix(nodes: list[dict], db_path: str, use_amap: bool = True,
+                          type_: str = "1") -> list[list[float]]:
+    """N×N 行驶秒矩阵。优先缓存→amap→haversine 降级。对角线 0。nodes 每项含 poi_id/lng/lat。"""
+    n = len(nodes)
+    m = [[0.0] * n for _ in range(n)]
+    if n <= 1:
+        return m
+    conn = _ensure_cache(db_path)
+    try:
+        for j, dest in enumerate(nodes):
+            missing_idx = []
+            for i, orig in enumerate(nodes):
+                if i == j:
+                    continue
+                row = conn.execute("SELECT dur FROM dist WHERE o=? AND d=? AND t=?",
+                                   (orig["poi_id"], dest["poi_id"], type_)).fetchone()
+                if row is not None:
+                    m[i][j] = row[0]
+                else:
+                    missing_idx.append(i)
+            if missing_idx and use_amap:
+                origins = [f"{nodes[i]['lng']},{nodes[i]['lat']}" for i in missing_idx]
+                dest_str = f"{dest['lng']},{dest['lat']}"
+                results = await amap.distance_batch(origins, dest_str, type_)
+                by_oid = {r["origin_id"]: r["duration"] for r in results}
+                for k, i in enumerate(missing_idx):
+                    dur = by_oid.get(k + 1)
+                    if dur is None or dur <= 0:
+                        dur = haversine_seconds(nodes[i], dest)
+                    m[i][j] = dur
+                    conn.execute("INSERT OR REPLACE INTO dist VALUES (?,?,?,?)",
+                                 (nodes[i]["poi_id"], dest["poi_id"], type_, dur))
+                conn.commit()
+            elif missing_idx:
+                for i in missing_idx:
+                    m[i][j] = haversine_seconds(nodes[i], dest)
+        return m
+    finally:
+        conn.close()
+```
+
+- [ ] **Step 5: 运行确认通过**
+
+Run: `uv run pytest tests/agent/test_matrix.py -v`
+Expected: PASS（4 passed）
+
+- [ ] **Step 6: 提交**
+
+```bash
+git add backend/pyproject.toml backend/uv.lock app/tools/amap.py app/agent/matrix.py tests/agent/test_matrix.py
+git commit -m "feat(react): ortools 依赖 + 高德距离矩阵接口(缓存+haversine降级)"
+```
+
+---
+
+## Task 2.5: OR-Tools 规划 schema + prefilter + VRPTW 求解 + 装配
+
+实现 OR-Tools 行程规划的纯算法层：Pydantic schema（重新定义，不迁旧文件）、候选粗筛、VRPTW 求解（含分天均衡）、路线装配。soft_fill 与工具封装在 Task 7。
+
+**Files:**
+- Create: `app/agent/planning.py`（schema + ITINERARY_SYS）
+- Create: `app/agent/prefilter.py`（候选粗筛）
+- Create: `app/agent/optimizer.py`（VRPTW 求解）
+- Create: `app/agent/assembler.py`（路线→骨架）
+- Test: `tests/agent/test_planning.py`, `tests/agent/test_optimizer.py`
+
+**Interfaces:**
+- Consumes: `matrix.duration_matrix`（Task 2）
+- Produces:
+  - `planning`：Pydantic schema `Location/DayWeather/PlanItem/Hotel/DayPlan/DayPlans` + `ITINERARY_SYS: str`（soft_fill 系统提示）。
+  - `prefilter.select_candidates(attractions: list[dict], days: int, per_day: int = 4) -> list[dict]` — 按评分/顺序粗筛，上限 `days*per_day`。纯函数。
+  - `optimizer.solve_vrptw(duration_matrix: list[list[float]], days: int) -> list[list[int]]` — 返回每天的节点索引路线（索引指向 matrix/nodes，0=depot）；分天均衡（每天点数上限 `ceil((n-1)/days)`）；无解时放松约束。纯函数（OR-Tools 确定性）。
+  - `assembler.routes_to_day_plans(routes: list[list[int]], candidates: list[dict]) -> list[dict]` — 每天路线索引 → `[{day, items:[{type:"attraction",name,poi_id,location}], ...}]` 骨架（不含软字段）。纯函数。
+
+- [ ] **Step 1: 写失败测试（planning schema）**
 
 Create `tests/agent/test_planning.py`:
 
 ```python
-from app.agent.planning import cluster_by_day, daily_centers_of, DayPlans, PlanItem
-
-
-def _p(name, lng, lat):
-    return {"name": name, "lng": lng, "lat": lat}
-
-
-def test_cluster_empty_returns_empty_buckets():
-    assert cluster_by_day([], 3) == [[], [], []]
-
-
-def test_cluster_balances_points_across_days():
-    pts = [_p(str(i), 104.0 + i * 0.01, 30.6 + i * 0.01) for i in range(6)]
-    buckets = cluster_by_day(pts, 3)
-    assert len(buckets) == 3
-    assert sum(len(b) for b in buckets) == 6
-    # 均衡：每天 2 个
-    assert all(len(b) == 2 for b in buckets)
-
-
-def test_daily_centers_centroid():
-    clusters = [[_p("a", 100.0, 30.0), _p("b", 102.0, 32.0)], []]
-    centers = daily_centers_of(clusters)
-    assert centers[0] == {"lng": 101.0, "lat": 31.0}
-    assert centers[1] == {"lng": 0.0, "lat": 0.0}
+from app.agent.planning import DayPlans, PlanItem, ITINERARY_SYS
 
 
 def test_dayplans_schema_parses():
     dp = DayPlans(days=[{"day": 1, "items": [{"type": "attraction", "name": "故宫"}]}])
     assert dp.days[0].day == 1
     assert dp.days[0].items[0].name == "故宫"
+
+
+def test_planitem_alias_from():
+    it = PlanItem(type="transport", **{"from": "A"}, to="B")
+    assert it.from_ == "A"
+
+
+def test_itinerary_sys_nonempty():
+    assert len(ITINERARY_SYS) > 50
+```
+
+Create `tests/agent/test_optimizer.py`:
+
+```python
+from app.agent.prefilter import select_candidates
+from app.agent.optimizer import solve_vrptw
+from app.agent.assembler import routes_to_day_plans
+
+
+def _poi(name, lng, lat, rating=5.0):
+    return {"name": name, "poi_id": name, "lng": lng, "lat": lat, "rating": rating}
+
+
+def test_prefilter_caps_candidates():
+    pois = [_poi(str(i), 104 + i * 0.01, 30.6) for i in range(20)]
+    out = select_candidates(pois, days=2, per_day=4)
+    assert len(out) <= 8
+
+
+def test_solve_vrptw_distributes_across_days_no_empty():
+    # 6 个点 + depot，2 天，应均衡分布、无空天
+    nodes = [{"poi_id": "depot", "lng": 104.05, "lat": 30.65}]
+    nodes += [_poi(str(i), 104.0 + i * 0.02, 30.6 + i * 0.02) for i in range(6)]
+    import math
+    n = len(nodes)
+    mat = [[0.0 if i == j else (abs(i - j) * 600.0) for j in range(n)] for i in range(n)]
+    routes = solve_vrptw(mat, days=2)
+    assert len(routes) == 2
+    visited = sorted(idx for r in routes for idx in r if idx != 0)
+    assert visited == list(range(1, 7))  # 所有点都被访问一次
+    assert all(len(r) > 0 for r in routes)  # 无空天
+
+
+def test_routes_to_day_plans_builds_skeleton():
+    candidates = [{"name": "A", "poi_id": "a", "lng": 104.0, "lat": 30.6},
+                  {"name": "B", "poi_id": "b", "lng": 104.1, "lat": 30.7}]
+    # routes 索引：0=depot，1->candidates[0]，2->candidates[1]
+    routes = [[0, 1], [0, 2]]
+    plans = routes_to_day_plans(routes, candidates)
+    assert len(plans) == 2
+    assert plans[0]["day"] == 1
+    assert plans[0]["items"][0]["name"] == "A"
+    assert plans[1]["items"][0]["name"] == "B"
 ```
 
 - [ ] **Step 2: 运行确认失败**
 
-Run: `uv run pytest tests/agent/test_planning.py -v`
-Expected: FAIL，`ModuleNotFoundError: No module named 'app.agent.planning'`
+Run: `uv run pytest tests/agent/test_planning.py tests/agent/test_optimizer.py -v`
+Expected: FAIL，`ModuleNotFoundError`
 
-- [ ] **Step 3: 写实现（迁移 itinerary.py 的纯函数 + schema）**
+- [ ] **Step 3a: 实现 planning.py（schema，注意编码）**
 
-Create `app/agent/planning.py`，从 `app/graph/nodes/itinerary.py` 复制以下内容（**保持算法逐字节一致**）：
+⚠️ 本机 GBK locale：新建 .py 首行加 `# -*- coding: utf-8 -*-`，description 内**不要用中文弯引号**（用直引号/书名号/无引号）。
+
+Create `app/agent/planning.py`:
 
 ```python
-"""行程规划纯函数与结构化 schema（迁自 itinerary 节点，算法不变）。
-
-cluster_by_day：贪心顺路分天；daily_centers_of：每簇质心。
-schema：供 assemble_itinerary tool 的 LLM structured output 使用。
-"""
-import math
-
+# -*- coding: utf-8 -*-
+"""行程规划结构化 schema（OR-Tools 装配后由 soft_fill LLM 填充软字段）。"""
 from pydantic import BaseModel, Field
 
-
-# ---- Pydantic schemas（迁自 itinerary.py）----
 
 class Location(BaseModel):
     lng: float = Field(default=0.0, description="经度，沿用输入坐标，不要自行编造")
@@ -255,24 +490,24 @@ class Location(BaseModel):
 
 
 class DayWeather(BaseModel):
-    text: str = Field(default="", description="天气描述，如“晴”“小雨”；沿用输入天气数据")
-    temp: str = Field(default="", description="气温，如“18~26℃”；沿用输入天气数据")
-    is_rainy: bool = Field(default=False, description="当天是否下雨，下雨时应优先安排室内项")
+    text: str = Field(default="", description="天气描述，如 晴 小雨；沿用输入天气数据")
+    temp: str = Field(default="", description="气温，如 18~26 摄氏度；沿用输入天气数据")
+    is_rainy: bool = Field(default=False, description="当天是否下雨，下雨时优先室内项")
 
 
 class PlanItem(BaseModel):
-    type: str = Field(description="行程项类型，仅限三种：attraction（景点）、meal（餐饮）、transport（交通）")
+    type: str = Field(description="行程项类型：attraction 景点 / meal 餐饮 / transport 交通")
     name: str = Field(default="", description="景点或餐厅名称；transport 项可留空")
     poi_id: str = Field(default="", description="高德 POI id，沿用输入数据，不要编造")
     location: Location = Field(default_factory=Location, description="该项经纬度，沿用输入坐标")
-    start: str = Field(default="", description="开始时间，24 小时制 HH:MM，如 09:30")
-    end: str = Field(default="", description="结束时间，24 小时制 HH:MM，如 11:30")
-    indoor: bool = Field(default=False, description="是否室内项；雨天优先安排 indoor=true 的项")
-    note: str = Field(default="", description="补充说明，一句话简述安排理由或注意事项")
-    mode: str = Field(default="", description="交通方式，如“步行”“地铁”“驾车”；仅 transport 项填写")
-    from_: str = Field(default="", alias="from", description="交通出发地名称；仅 transport 项填写")
-    to: str = Field(default="", description="交通目的地名称；仅 transport 项填写")
-    cost: float = Field(default=0.0, description="该项人均花费(元)：门票/餐标/市内交通；免费景点或交通项填 0")
+    start: str = Field(default="", description="开始时间 HH:MM，如 09:30")
+    end: str = Field(default="", description="结束时间 HH:MM，如 11:30")
+    indoor: bool = Field(default=False, description="是否室内项；雨天优先安排室内项")
+    note: str = Field(default="", description="补充说明，一句话简述安排理由")
+    mode: str = Field(default="", description="交通方式，如 步行 地铁 驾车；仅 transport 项填写")
+    from_: str = Field(default="", alias="from", description="交通出发地；仅 transport 项填写")
+    to: str = Field(default="", description="交通目的地；仅 transport 项填写")
+    cost: float = Field(default=0.0, description="该项人均花费(元)；免费或无费用填 0")
 
     model_config = {"populate_by_name": True}
 
@@ -286,94 +521,153 @@ class Hotel(BaseModel):
 
 
 class DayPlan(BaseModel):
-    day: int = Field(description="第几天，从 1 开始的正整数")
-    date: str = Field(default="", description="当天日期，格式 YYYY-MM-DD；由 start_date 顺延推算")
-    weather: DayWeather = Field(default_factory=DayWeather, description="当天天气，沿用输入天气数据")
-    center: Location = Field(default_factory=Location, description="当天活动的中心坐标")
-    items: list[PlanItem] = Field(default_factory=list, description="当天按时间顺序排列的行程项")
+    day: int = Field(description="第几天，从 1 开始")
+    date: str = Field(default="", description="当天日期 YYYY-MM-DD；由 start_date 顺延")
+    weather: DayWeather = Field(default_factory=DayWeather, description="当天天气")
+    center: Location = Field(default_factory=Location, description="当天活动中心坐标")
+    items: list[PlanItem] = Field(default_factory=list, description="当天按时间顺序的行程项")
     hotel: Hotel | None = Field(default=None, description="当晚住宿；离程日/单日游为 None")
 
 
 class DayPlans(BaseModel):
-    days: list[DayPlan] = Field(default_factory=list, description="逐天行程，长度应等于总天数")
+    days: list[DayPlan] = Field(default_factory=list, description="逐天行程")
 
 
 ITINERARY_SYS = (
-    "你是行程编排助手。给定每天的景点簇、餐厅候选、交通与天气，为每天安排合理的时间线："
-    "上午/下午景点、午餐/晚餐就近分配餐厅、必要的市内交通。雨天优先室内项。"
-    "为每个行程项估算人均花费 cost（元）：门票按景点合理价、餐标按餐厅档位、市内交通按方式估；"
-    "免费景点或无费用项填 0。"
-    "若输入含 budget_advice（上轮超支额与削减建议），据此压低总花费："
-    "优先减少或替换高价付费景点、降低餐标、精简交通。"
-    "输出严格符合给定结构（含每项的 location 经纬度与 cost，沿用输入坐标）。"
+    "你是行程编排助手。给定已确定的逐日景点顺序与坐标、餐厅候选、天气，"
+    "为每个行程项填充软字段：合理的 start/end 时间段、人均花费 cost（门票/餐标/市内交通，免费填 0）、"
+    "indoor 是否室内、note 一句话说明。雨天优先室内项。就近为每天插入午餐/晚餐餐厅。"
+    "若输入含 budget_advice（超支额与削减建议），据此压低 cost。"
+    "不要改变景点的顺序与分天，只填软字段并按需插入餐饮/交通项。"
+    "输出严格符合给定结构，location 经纬度沿用输入。"
 )
+```
+
+写完立即验证导入：
+Run: `uv run python -c "import app.agent.planning as p; print(p.DayPlans(days=[{'day':1,'items':[{'type':'attraction','name':'故宫'}]}]).days[0].day); print('OK')"`
+Expected: 打印 `1` 和 `OK`（若 SyntaxError/乱码→编码坑，检查引号与 coding 声明）。
+
+- [ ] **Step 3b: 实现 prefilter.py**
+
+Create `app/agent/prefilter.py`:
+
+```python
+# -*- coding: utf-8 -*-
+"""候选景点粗筛：按评分降序取前 days*per_day 个，控制 VRPTW 求解规模。纯函数。"""
 
 
-# ---- 纯函数（迁自 itinerary.py，算法不变）----
+def select_candidates(attractions: list[dict], days: int, per_day: int = 4) -> list[dict]:
+    cap = max(1, days) * max(1, per_day)
+    valid = [a for a in (attractions or []) if a.get("lng") and a.get("lat")]
+    ranked = sorted(valid, key=lambda a: -(a.get("rating", 0.0) or 0.0))
+    return ranked[:cap]
+```
 
-def _dist(a: dict, b: dict) -> float:
-    return math.hypot(a.get("lng", 0.0) - b.get("lng", 0.0),
-                      a.get("lat", 0.0) - b.get("lat", 0.0))
+- [ ] **Step 3c: 实现 optimizer.py（VRPTW + 分天均衡）**
+
+Create `app/agent/optimizer.py`:
+
+```python
+# -*- coding: utf-8 -*-
+"""OR-Tools VRPTW 求解：days 辆车从 depot(0) 出发覆盖所有候选点，最小化总行驶时间。
+
+分天均衡：每车（每天）访问点数上限 ceil((n-1)/days)，根治某天空着。
+无解时放松均衡约束重试。纯函数（OR-Tools 确定性）。
+"""
+import math
+
+from ortools.constraint_solver import pywrapcp, routing_enums_pb2
 
 
-def _nearest_neighbor_order(seg: list[dict]) -> list[dict]:
-    if not seg:
-        return []
-    remaining = list(seg)
-    cur = min(remaining, key=lambda p: (p.get("lng", 0.0), p.get("lat", 0.0)))
-    remaining.remove(cur)
-    route = [cur]
-    while remaining:
-        nxt = min(remaining, key=lambda p: _dist(p, route[-1]))
-        remaining.remove(nxt)
-        route.append(nxt)
-    return route
-
-
-def cluster_by_day(points: list[dict], days: int) -> list[list[dict]]:
-    """贪心：按方位角排序 → 均衡切 days 段 → 段内最近邻顺路。纯函数。"""
+def solve_vrptw(duration_matrix: list[list[float]], days: int) -> list[list[int]]:
+    n = len(duration_matrix)
     days = max(1, days)
-    buckets: list[list[dict]] = [[] for _ in range(days)]
-    if not points:
-        return buckets
-    cx = sum(p.get("lng", 0.0) for p in points) / len(points)
-    cy = sum(p.get("lat", 0.0) for p in points) / len(points)
-    ordered = sorted(points, key=lambda p: math.atan2(p.get("lat", 0.0) - cy,
-                                                       p.get("lng", 0.0) - cx))
-    n = len(ordered)
-    base, extra = divmod(n, days)
-    idx = 0
-    for d in range(days):
-        size = base + (1 if d < extra else 0)
-        seg = ordered[idx:idx + size]
-        idx += size
-        buckets[d] = _nearest_neighbor_order(seg)
-    return buckets
+    if n <= 1:
+        return [[] for _ in range(days)]
+
+    def _solve(cap: int) -> list[list[int]] | None:
+        mgr = pywrapcp.RoutingIndexManager(n, days, 0)  # 0 = depot
+        routing = pywrapcp.RoutingModel(mgr)
+
+        def _cost(from_idx, to_idx):
+            i, j = mgr.IndexToNode(from_idx), mgr.IndexToNode(to_idx)
+            return int(duration_matrix[i][j])
+
+        transit = routing.RegisterTransitCallback(_cost)
+        routing.SetArcCostEvaluatorOfAllVehicles(transit)
+
+        # 均衡：每点 demand=1，每车容量 cap
+        def _demand(idx):
+            return 0 if mgr.IndexToNode(idx) == 0 else 1
+
+        dem = routing.RegisterUnaryTransitCallback(_demand)
+        routing.AddDimensionWithVehicleCapacity(dem, 0, [cap] * days, True, "Count")
+
+        params = pywrapcp.DefaultRoutingSearchParameters()
+        params.first_solution_strategy = routing_enums_pb2.FirstSolutionStrategy.PATH_CHEAPEST_ARC
+        params.local_search_metaheuristic = routing_enums_pb2.LocalSearchMetaheuristic.GUIDED_LOCAL_SEARCH
+        params.time_limit.FromSeconds(3)
+        sol = routing.SolveWithParameters(params)
+        if sol is None:
+            return None
+        routes = []
+        for v in range(days):
+            idx = routing.Start(v)
+            route = []
+            while not routing.IsEnd(idx):
+                node = mgr.IndexToNode(idx)
+                if node != 0:
+                    route.append(node)
+                idx = sol.Value(routing.NextVar(idx))
+            routes.append(route)
+        return routes
+
+    base_cap = math.ceil((n - 1) / days)
+    for cap in (base_cap, base_cap + 1, n - 1):  # 放松：均衡→宽松→无均衡
+        routes = _solve(cap)
+        if routes is not None and any(r for r in routes):
+            return routes
+    # 兜底：顺序均分
+    pts = list(range(1, n))
+    return [pts[i::days] for i in range(days)]
+```
+
+- [ ] **Step 3d: 实现 assembler.py**
+
+Create `app/agent/assembler.py`:
+
+```python
+# -*- coding: utf-8 -*-
+"""路线索引 → DayPlan 骨架（仅景点项，软字段留空待 soft_fill 填）。纯函数。"""
 
 
-def daily_centers_of(clusters: list[list[dict]]) -> list[dict]:
-    """每簇质心 {lng,lat}；空簇 {0,0}。纯函数。"""
-    centers = []
-    for c in clusters:
-        if c:
-            cx = sum(p.get("lng", 0.0) for p in c) / len(c)
-            cy = sum(p.get("lat", 0.0) for p in c) / len(c)
-        else:
-            cx = cy = 0.0
-        centers.append({"lng": cx, "lat": cy})
-    return centers
+def routes_to_day_plans(routes: list[list[int]], candidates: list[dict]) -> list[dict]:
+    """routes[d] 是第 d 天的节点索引列表（1-based 指向 candidates，0=depot 已剔除）。"""
+    plans = []
+    for d, route in enumerate(routes, start=1):
+        items = []
+        for node_idx in route:
+            c = candidates[node_idx - 1]  # node 1 → candidates[0]
+            items.append({
+                "type": "attraction", "name": c.get("name", ""),
+                "poi_id": c.get("poi_id", ""),
+                "location": {"lng": c.get("lng", 0.0), "lat": c.get("lat", 0.0)},
+                "start": "", "end": "", "indoor": False, "note": "", "cost": 0.0,
+            })
+        plans.append({"day": d, "items": items})
+    return plans
 ```
 
 - [ ] **Step 4: 运行确认通过**
 
-Run: `uv run pytest tests/agent/test_planning.py -v`
-Expected: PASS（4 passed）
+Run: `uv run pytest tests/agent/test_planning.py tests/agent/test_optimizer.py -v`
+Expected: PASS（6 passed）
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add app/agent/planning.py tests/agent/test_planning.py
-git commit -m "feat(react): 迁移规划纯函数+schema 到 agent/planning"
+git add app/agent/planning.py app/agent/prefilter.py app/agent/optimizer.py app/agent/assembler.py tests/agent/test_planning.py tests/agent/test_optimizer.py
+git commit -m "feat(react): OR-Tools 规划层 schema+prefilter+VRPTW+装配"
 ```
 
 ---
