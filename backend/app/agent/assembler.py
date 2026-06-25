@@ -3,7 +3,7 @@
 
 
 def routes_to_day_plans(routes: list[list[int]], candidates: list[dict]) -> list[dict]:
-    """routes[d] 是第 d 天的节点索引列表（1-based 指向 candidates，0=depot 已剔除）。"""
+    """routes[d] 是第 d 天的节点索引列表（1-based 指向 candidates；depot(0) 若存在会被跳过）。"""
     plans = []
     for d, route in enumerate(routes, start=1):
         items = []

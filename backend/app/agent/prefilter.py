@@ -4,6 +4,6 @@
 
 def select_candidates(attractions: list[dict], days: int, per_day: int = 4) -> list[dict]:
     cap = max(1, days) * max(1, per_day)
-    valid = [a for a in (attractions or []) if a.get("lng") and a.get("lat")]
+    valid = [a for a in (attractions or []) if a.get("lng") is not None and a.get("lat") is not None]
     ranked = sorted(valid, key=lambda a: -(a.get("rating", 0.0) or 0.0))
     return ranked[:cap]
