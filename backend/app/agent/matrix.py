@@ -4,7 +4,8 @@
 供 OR-Tools VRPTW 求解器消费。缓存用独立 SQLite 文件（与 checkpointer 分离，避免写锁冲突）。
 """
 import math
-import sqlite3
+
+import aiosqlite
 
 from app.tools import amap
 
@@ -25,10 +26,12 @@ def haversine_seconds(a: dict, b: dict, kmh: float = 30.0) -> float:
     return round(km / max(1e-6, kmh) * 3600, 1)
 
 
-def _ensure_cache(db_path: str) -> sqlite3.Connection:
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    conn.execute("CREATE TABLE IF NOT EXISTS dist (o TEXT, d TEXT, t TEXT, dur REAL, PRIMARY KEY(o,d,t))")
-    conn.commit()
+async def _ensure_cache(db_path: str) -> aiosqlite.Connection:
+    conn = await aiosqlite.connect(db_path)
+    await conn.execute(
+        "CREATE TABLE IF NOT EXISTS dist (o TEXT, d TEXT, t TEXT, dur REAL, PRIMARY KEY(o,d,t))"
+    )
+    await conn.commit()
     return conn
 
 
@@ -39,15 +42,18 @@ async def duration_matrix(nodes: list[dict], db_path: str, use_amap: bool = True
     m = [[0.0] * n for _ in range(n)]
     if n <= 1:
         return m
-    conn = _ensure_cache(db_path)
+    conn = await _ensure_cache(db_path)
     try:
         for j, dest in enumerate(nodes):
             missing_idx = []
             for i, orig in enumerate(nodes):
                 if i == j:
                     continue
-                row = conn.execute("SELECT dur FROM dist WHERE o=? AND d=? AND t=?",
-                                   (orig["poi_id"], dest["poi_id"], type_)).fetchone()
+                async with conn.execute(
+                    "SELECT dur FROM dist WHERE o=? AND d=? AND t=?",
+                    (orig["poi_id"], dest["poi_id"], type_),
+                ) as cur:
+                    row = await cur.fetchone()
                 if row is not None:
                     m[i][j] = row[0]
                 else:
@@ -62,12 +68,14 @@ async def duration_matrix(nodes: list[dict], db_path: str, use_amap: bool = True
                     if dur is None or dur <= 0:
                         dur = haversine_seconds(nodes[i], dest)
                     m[i][j] = dur
-                    conn.execute("INSERT OR REPLACE INTO dist VALUES (?,?,?,?)",
-                                 (nodes[i]["poi_id"], dest["poi_id"], type_, dur))
-                conn.commit()
+                    await conn.execute(
+                        "INSERT OR REPLACE INTO dist VALUES (?,?,?,?)",
+                        (nodes[i]["poi_id"], dest["poi_id"], type_, dur),
+                    )
+                await conn.commit()
             elif missing_idx:
                 for i in missing_idx:
                     m[i][j] = haversine_seconds(nodes[i], dest)
         return m
     finally:
-        conn.close()
+        await conn.close()

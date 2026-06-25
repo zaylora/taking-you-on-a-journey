@@ -101,6 +101,7 @@ async def distance_batch(origins: list[str], destination: str, type_: str = "1")
     """批量距离：origins(<=100 个 "lng,lat") -> destination。返回 [{origin_id,dest_id,distance,duration}]；失败 []。"""
     if not origins or not destination:
         return []
+    origins = origins[:100]
     try:
         async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
             r = await client.get(f"{_BASE}/distance", params={
