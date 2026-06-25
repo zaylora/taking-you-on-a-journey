@@ -8,3 +8,12 @@ from app.agent.build import build_trip_agent
 
 def build_graph(checkpointer=None):
     return build_trip_agent(checkpointer)
+
+
+def make_graph():
+    """langgraph dev / LangGraph Platform 入口。
+
+    平台自带持久化（checkpointer + store），显式传 None 关掉内置 MemorySaver，
+    避免与平台冲突。langgraph.json 的 graphs 指向本函数。
+    """
+    return build_trip_agent(checkpointer=None)

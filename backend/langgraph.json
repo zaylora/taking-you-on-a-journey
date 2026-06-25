@@ -1,0 +1,8 @@
+{
+  "dependencies": ["."],
+  "graphs": {
+    "trip_agent": "./app/graph/builder.py:make_graph"
+  },
+  "env": ".env",
+  "python_version": "3.11"
+}

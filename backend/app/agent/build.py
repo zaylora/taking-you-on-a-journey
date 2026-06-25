@@ -16,12 +16,18 @@ _TOOLS = [
     assemble_itinerary, assign_hotels, compute_budget_tool, ask_user, finalize_plan,
 ]
 
+# 用哨兵区分「未传 checkpointer」（默认 MemorySaver）与「显式不要 checkpointer」（None）。
+# 后者用于 langgraph dev：平台自带持久化，外挂 checkpointer 会冲突。
+_DEFAULT = object()
 
-def build_trip_agent(checkpointer=None):
+
+def build_trip_agent(checkpointer=_DEFAULT):
+    if checkpointer is _DEFAULT:
+        checkpointer = MemorySaver()
     return create_agent(
         model=build_llm(temperature=0, disable_streaming=False),
         tools=_TOOLS,
         system_prompt=TRIP_AGENT_SYS,
         state_schema=TripState,
-        checkpointer=checkpointer or MemorySaver(),
+        checkpointer=checkpointer,
     )
