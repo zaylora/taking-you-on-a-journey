@@ -16,28 +16,12 @@ EVENT_TITLE = "title"       # data: {"thread_id","title"} —— 会话标题更
 EVENT_INTENT = "intent"     # data: {"intent"} —— M5 意图调试/进度
 EVENT_PLAN_PATCH = "plan_patch"  # data: {"plan_version","changed_days"} —— 局部更新提示
 
-# 图节点全集（桥接层据此过滤 on_chain_start/end 名）
-NODES = {"memory", "dispatch_agent", "clarify", "retrieve", "weather", "attractions",
-         "restaurants", "transport", "itinerary", "refine", "answer",
-         "accommodation", "budget", "summarize", "memory_update"}
+# 图节点全集（create_agent 内部节点：model 决策/回复、tools 执行）
+NODES = {"agent", "model", "tools"}
 
-# node_start 携带的友好阶段文案（前端进度条展示，不暴露中间 LLM token）
+# node_start 携带的友好阶段文案（agent 内部节点较少，仅作兜底）
 NODE_LABELS = {
-    "clarify": "正在理解你的需求…",
-    "memory": "正在读取会话上下文…",
-    "dispatch_agent": "正在判断任务并分发…",
-    "retrieve": "正在并行检索…",
-    "weather": "正在查询目的地天气…",
-    "attractions": "正在检索热门景点…",
-    "restaurants": "正在挑选餐厅…",
-    "transport": "正在规划交通…",
-    "itinerary": "正在按顺路编排每日行程…",
-    "refine": "正在局部调整行程…",
-    "answer": "正在基于当前方案回答…",
-    "accommodation": "正在挑选住宿…",
-    "budget": "正在核算预算…",
-    "summarize": "正在生成攻略…",
-    "memory_update": "正在保存会话记忆…",
+    "agent": "正在思考...",
+    "model": "正在思考...",
+    "tools": "正在调用工具...",
 }
-
-MAX_CLARIFY_ROUNDS = 4   # clarify 自循环轮次上限，超限取兜底放行
