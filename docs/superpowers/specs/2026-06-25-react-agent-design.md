@@ -5,7 +5,7 @@
 - 范围：后端 `app/graph` 从「16 节点固定编排图」重构为**一个** ReAct Agent（`create_agent`）+ 一组确定性 tools。外层不再有任何包裹节点（`memory` / `context_prep` / `summarize` / `memory_update` 全部去掉）；`build_graph` 直接返回 `create_agent(...)` 作为 `app.state.graph`。保留 clarify 中断、最终回复流式、plan_patch 增量更新三项对前端的硬契约；前端按需小幅调整。
 - 验收标准：
   1. 用户的规划/修改/问答请求全部由**一个** ReAct Agent 处理，由 LLM 自主决定调用哪些工具、调用几次、何时收尾，不再有编译期写死的意图分流、节点路由与外围包裹节点。
-  2. 费用核算（人均/整间口径）、超支判定、分天聚类、过夜日判定、`changed_days` 计算等**确定性业务规则**结果与重构前一致（回归测试保证）。
+  2. 费用核算（人均/整间口径）、超支判定、过夜日判定、`changed_days` 计算等**确定性业务规则**结果正确；行程规划用 OR-Tools VRPTW（从 0 设计，取代旧贪心）。
   3. 信息不足时 LLM **自主**调用 `ask_user` 提问并暂停，前端 `clarify` 弹窗交互不变；信息充分时 LLM 直接规划、不提问。
   4. 最终回复（规划攻略 / QA 答案）由 **agent 本体**逐 token 流式输出，前端打字机效果不变；agent 中间自然语言文本（思考/说明）也一并流出（用户接受可见），仅工具原始 JSON 不流。
   5. plan 改动后前端地图仍能按 `changed_days` + `plan_version` 增量重绘。
@@ -16,7 +16,7 @@
 |---|---|---|
 | Agent 范式 | 全局单 Agent ReAct，外层无包裹节点 | `build_graph` 直接返回 `create_agent(...)`；上下文历史与 interrupt/resume 全走 checkpointer |
 | 循环实现 | `langchain.agents.create_agent` | langgraph 1.2.5 / langchain 1.3.9 下 `create_react_agent` 已弃用并迁移至此 |
-| 业务规则归属 | 包成 tools，确定性纯函数保留 | LLM 决定「调哪个/几次/何时停」，但费用/聚类/过夜/diff 算法是 tool 内纯函数，LLM 改不了 |
+| 业务规则归属 | 包成 tools，确定性逻辑在 tool 内 | LLM 决定「调哪个/几次/何时停」；费用/过夜/diff 是纯函数，行程规划是 tool 内 OR-Tools 管线，LLM 改不了 |
 | 澄清提问 | `ask_user` 作为普通 tool，LLM 自主决定是否调用（决策 B） | 取消固定 clarify 前置关卡；`interrupt()` 仅作「提问」动作的暂停机制 |
 | changed_days | `finalize_plan` 内部新旧 day_plans 逐天 diff 自动计算（决策 A） | 对 LLM 透明，前端增量重绘契约不变 |
 | 最终回复 | agent 本体输出（规划攻略 / QA 答案统一），中间文本可见（决策 C） | 不引入收尾节点；流式放行 model 文本 token、不流工具原始 JSON（§2.3），规则极简无需实测过滤 |
@@ -67,7 +67,7 @@ ReAct 的价值正在于：LLM 在 Reason→Act→Observe 循环里**自主**应
 1. **clarify 的 `interrupt()` 暂停/resume**：前端靠 `EVENT_CLARIFY` 弹问题、`Command(resume=...)` 续跑（见 `stream.py:41,58-60`）。
 2. **最终回复逐 token 流式**：`stream.py:49` 现按 `metadata.langgraph_node=="summarize"` 放行 token 做打字机效果。重构后由 agent 本体输出，改为放行所有 `on_chat_model_stream` 文本 token（中间文本+最终回复，§2.3），工具原始 JSON 不走该事件、天然不流。
 3. **`EVENT_PLAN_PATCH` + `changed_days` + `plan_version`**：前端地图据此局部增量重绘（`stream.py:68-69`）。
-4. **确定性业务规则**：费用人均/整间口径（`budget._sum_costs`）、超支回退（`compute_budget`，`_MAX_RETRY=2`）、分天聚类（`itinerary.cluster_by_day`）、过夜日（`accommodation.overnight_days`）。这些是 M4/M5 反复修过的，回归风险最高。
+4. **确定性业务规则**：费用人均/整间口径（`budget._sum_costs`）、超支回退（`compute_budget`，`_MAX_RETRY=2`）、过夜日（`accommodation.overnight_days`）。这些是 M4/M5 反复修过的，回归风险最高。行程规划改用 OR-Tools VRPTW（从 0 设计，§3.2）。
 5. **API 契约**：`main.py:50` 用 `build_graph(checkpointer=...)` 得到 `app.state.graph`；`stream.py` 用 `graph.astream_events` / `aget_state`。`build_graph` 重构后**签名不变**（仍收 checkpointer、仍返回 compiled graph），`main.py` 零改动。
 
 ## 2. 目标架构
@@ -84,7 +84,7 @@ START → trip_agent (create_agent ReAct 循环) → END
 
    工具箱（LLM 自主调度）：
      检索类：search_attractions / search_restaurants / get_weather / plan_route
-     编排类：assemble_itinerary  (cluster_by_day 纯函数 + LLM 编排)
+     编排类：assemble_itinerary  (OR-Tools VRPTW 管线 + LLM 软填)
              assign_hotels       (overnight_days 纯函数 + attach_hotels)
      核算类：compute_budget       (M4 纯函数，返回超支建议)
      交互类：ask_user            (interrupt 暂停，HITL；LLM 自主决定是否调用)
@@ -165,12 +165,26 @@ def build_graph(checkpointer=None):
 
 `amap.py` 已是干净 async 函数 + `@traceable`，几乎零改动包装成 `@tool`。
 
-### 3.2 编排类（确定性聚类保留）
+### 3.2 编排类（OR-Tools 行程规划，从 0 设计）
 
-- `assemble_itinerary(...)`：内部先调 `cluster_by_day`（**纯函数贪心聚类，原样保留**）做分天，再用现有 LLM 结构化输出（`DayPlans` schema）填充时间线。返回结构化 day_plans。
-- `assign_hotels(...)`：内部 `overnight_days`（**过夜日纯函数保留**）判定过夜日 + `attach_hotels` 嵌入。
+行程规划用 **OR-Tools VRPTW 求解**（算法主导选点/分天/顺路），取代旧贪心 `cluster_by_day`。封装为**单一工具** `assemble_itinerary`，LLM 不感知 OR-Tools 细节。
 
-> LLM 自主决定：要不要调 `assemble_itinerary`（首次规划要、纯问答不要）、调用前是否已备齐 attractions/restaurants/weather（缺则先调检索）。
+- `assemble_itinerary(city, days, attractions, restaurants, weather, start_date="", num_people=1, budget_advice=None) -> dict`，内部管线（全在工具内，对 LLM 透明）：
+  1. **prefilter**：按评分/热度粗筛候选景点，上限 ~ `days × 每日点数上限`，避免求解规模过大。纯函数。
+  2. **距离矩阵**：调高德 `/v3/distance`（`type=1` 驾车，真实街道时间）算候选点两两 `duration` 秒矩阵；**SQLite 缓存**（独立 `distance_cache.sqlite`，避免与 checkpointer 抢写锁）；API 失败/超配额降级 **haversine 直线距离 × 经验速度** 估时。
+  3. **VRPTW 求解**：OR-Tools `RoutingModel`，depot=候选质心，车辆数=`days`，目标最小化总行驶时间；**均衡约束**（每天点数上限 `ceil(n/days)`，根治"某天空着"）；多级放松（求不出解时放宽约束）。营业时间窗本期不加（决策：先不用）。
+  4. **装配**：求解出的 per-day 路线 → `DayPlan` 骨架（顺序、分天、坐标）。纯函数。
+  5. **soft_fill**：再调一次 LLM 填软字段（每项 `start/end` 时间段、`cost` 人均花费、`note` 说明、`indoor`、雨天调整），输出 `DayPlans` structured output。这是工具内部第二次 LLM 调用。
+- `assign_hotels(city, day_plans, level, daily_centers) -> list`：为过夜日就近选酒店（`overnight_days` 判定过夜日 + LLM 按档位/就近分配 + `attach_hotels` 嵌入）。
+
+依赖与接口新增：
+- 新增 `ortools>=9.0` 依赖。
+- 新增 `amap.distance_matrix_batch(origins, destination, type=1)` 或在工具层直接调 `/v3/distance`（origins 批量 ≤100，destination 单点，循环 N 次得 N×N）；返回 `results[].distance/duration/origin_id/dest_id`。
+- 距离矩阵缓存键：`(origin_poi_id, dest_poi_id, type)`；独立 SQLite 文件。
+
+> LLM 自主决定：要不要调 `assemble_itinerary`（首次规划/重排要、纯问答不要）、调用前是否已备齐 attractions/restaurants/weather（缺则先调检索）。OR-Tools 求解、距离矩阵、分天均衡等是工具内部确定性逻辑，LLM 改不了。
+
+> 设计差异说明（vs m6-v2）：m6-v2 把 OR-Tools 嵌在固定 itinerary 节点、由编排图喂数据；ReAct 里它是 LLM 自主调用的**工具**，输入输出契约、降级、与其他工具协作方式不同，故从 0 设计而非合并 m6-v2 代码。本期不做营业时间窗（opentime），求解器仅优化路线 + 分天均衡。
 
 ### 3.3 核算类（费用口径保留）
 
@@ -256,7 +270,8 @@ def build_graph(checkpointer=None):
 ### 7.1 确定性纯函数单测（回归保证，最高优先级）
 
 - `diff_changed_days`：新增，覆盖全规划/单天改/换酒店/无改动。
-- `compute_budget` / `cluster_by_day` / `overnight_days` / `attach_hotels`：复用现有单测，**结果与重构前逐字节一致**。
+- `compute_budget` / `overnight_days` / `attach_hotels`：复用现有口径单测，**结果与重构前一致**。
+- OR-Tools 管线（prefilter/距离矩阵/求解/装配）：新增单测，覆盖 happy path + haversine 降级 + 求解放松 + 分天均衡（不空天）。
 
 ### 7.2 工具层单测
 
@@ -302,7 +317,7 @@ def build_graph(checkpointer=None):
 ## 10. 实现顺序（交 writing-plans 细化）
 
 0. **Task 0 真实环境验证**：`create_agent` import/签名/checkpointer/interrupt 冒泡/自定义 state_schema/版本 bug/老会话反序列化；确认关闭 `disable_streaming` 后 tool-calling 仍正确、`on_chat_model_stream` 文本 token 正常冒泡且工具 JSON 不混入。任一关键项不通过 → 回报用户调整 spec。
-1. 抽确定性纯函数为独立可测单元（迁入 `tools/` 或 `core/`；`diff_changed_days` 新增；聚类/预算/过夜复用）。
+1. 抽确定性纯函数为独立可测单元（`diff_changed_days` 新增；预算/过夜复用）；OR-Tools 行程规划管线从 0 实现（prefilter/距离矩阵+缓存/VRPTW 求解/装配/soft_fill）+ ortools 依赖 + amap 距离接口。
 2. 实现工具层（检索/编排/核算/ask_user/finalize_plan）+ 单测。
 3. 组装 `build_graph` = `create_agent`（系统提示 + tools + state_schema + checkpointer）。
 4. 改 `stream.py`（token 过滤 + summary 取末条 AIMessage + 节点/进度）+ `constants.py`（NODES/标签清理、删 `MAX_CLARIFY_ROUNDS`、评估删 `EVENT_INTENT`）。
@@ -334,7 +349,7 @@ def build_graph(checkpointer=None):
 
 | 文件 | 迁出符号（保留，移入 tools/core） | 文件本身 |
 |---|---|---|
-| `graph/nodes/itinerary.py` | `cluster_by_day` / `_nearest_neighbor_order` / `_dist` / `DayPlan` 等 Pydantic schema / `_SYS` 编排提示 / `_build_payload` | 迁出后删 |
+| `graph/nodes/itinerary.py` | 整删。旧贪心 `cluster_by_day` 等被 OR-Tools 管线取代（不迁移）；`DayPlan` 等 Pydantic schema 在 `app/agent/planning.py` 重新定义（OR-Tools 工具复用），不从旧文件迁 | 整删 |
 | `graph/nodes/budget.py` | `compute_budget` / `_sum_costs` / `_pick_cut_suggestions` / `_MAX_RETRY` | 迁出后删 |
 | `graph/nodes/accommodation.py` | `overnight_days` / `attach_hotels` / `hotel_keyword` / `Hotel`·`_AccoResult` schema / `_SYS` | 迁出后删 |
 
