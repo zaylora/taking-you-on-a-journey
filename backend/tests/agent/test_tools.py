@@ -70,3 +70,35 @@ async def test_assign_hotels_embeds(fake_amap, monkeypatch):
     dps = [{"day": 1, "items": []}, {"day": 2, "items": []}]  # 过夜日=第1天
     out = await tools.assign_hotels.ainvoke({"city": "北京", "day_plans": dps, "level": "经济"})
     assert out[0]["hotel"]["name"] == "如家"
+
+
+from langgraph.types import Command as _Command
+
+
+@pytest.mark.asyncio
+async def test_compute_budget_tool_reports_over(fake_amap):
+    dps = [{"day": 1, "items": [{"type": "attraction", "name": "A", "cost": 5000}]}, {"day": 2, "items": []}]
+    out = await tools.compute_budget_tool.ainvoke({
+        "day_plans": dps, "num_people": 1, "limit": 100,
+        "state": {"retry_count": 0},
+    })
+    assert out["budget_check"]["over"] is True
+    assert isinstance(out["cut_suggestions"], list)
+
+
+@pytest.mark.asyncio
+async def test_finalize_plan_writes_and_diffs(fake_amap):
+    new_dps = [{"day": 1, "items": [{"type": "attraction", "name": "故宫", "poi_id": "p1"}]}]
+    cmd = await tools.finalize_plan.ainvoke({
+        "type": "tool_call",
+        "name": "finalize_plan",
+        "id": "call_x",
+        "args": {
+            "day_plans": new_dps,
+            "state": {"day_plans": [], "plan_version": 0},
+        },
+    })
+    assert isinstance(cmd, _Command)
+    assert cmd.update["day_plans"] == new_dps
+    assert cmd.update["changed_days"] == [1]
+    assert cmd.update["plan_version"] == 1
