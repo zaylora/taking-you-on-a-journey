@@ -10,7 +10,7 @@ def _extract(body: str, event: str) -> dict:
 
 
 def _stub_initial_plan(monkeypatch):
-    from app.graph.nodes import accommodation as acc, clarify as c, dispatch_agent as d, itinerary as it, summarize as s
+    from app.graph.nodes import accommodation as acc, clarify as c, dispatch_agent as d, itinerary as it
     from app.graph.nodes.accommodation import _AccoResult
     from app.graph.nodes.dispatch import NormalizedReq
     from app.graph.nodes.itinerary import DayPlans, DayPlan, PlanItem, Location, DayWeather
@@ -33,7 +33,6 @@ def _stub_initial_plan(monkeypatch):
         ]),
     ])))
     monkeypatch.setattr(acc, "build_llm", make_fake_build_llm(structured=_AccoResult(assignments=[])))
-    monkeypatch.setattr(s, "build_llm", make_fake_build_llm(tokens=["已生成", "成都行程"]))
 
 
 def test_second_turn_relaxes_only_target_day(client, fake_amap, monkeypatch):
