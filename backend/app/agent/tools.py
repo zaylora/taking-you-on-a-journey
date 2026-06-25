@@ -4,9 +4,29 @@
 检索类直接复用 app/tools/amap.py（失败降级，不抛）。
 编排/核算/收尾类见后续步骤；ask_user 经 interrupt 暂停。
 """
+import os
+
 from langchain_core.tools import tool
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from app.tools import amap
+from app.core.config import get_settings
+from app.agent.prefilter import select_candidates
+from app.agent.matrix import duration_matrix
+from app.agent.optimizer import solve_vrptw
+from app.agent.assembler import routes_to_day_plans
+from app.agent.planning import DayPlans, ITINERARY_SYS
+from app.agent.lodging import (
+    overnight_days, attach_hotels, hotel_keyword, _AccoResult, ACCO_SYS,
+)
+from app.llm.factory import build_llm
+
+
+def _distance_cache_path() -> str:
+    """由 checkpoint 库路径派生同目录下独立的距离缓存库文件名。"""
+    ckpt = get_settings().checkpoint_db_path
+    d = os.path.dirname(ckpt) or "."
+    return os.path.join(d, "distance_cache.sqlite")
 
 
 @tool
@@ -43,3 +63,76 @@ async def plan_route(origin: str, dest: str, mode: str = "transit") -> dict:
         return await amap.plan_route(origin, dest, mode)
     except Exception:  # noqa: BLE001
         return {}
+
+
+@tool
+async def assemble_itinerary(city: str, days: int, attractions: list, restaurants: list,
+                             weather: dict, start_date: str = "", num_people: int = 1,
+                             budget_advice: dict | None = None) -> dict:
+    """把景点编排成逐日行程。内部用 OR-Tools VRPTW 求最优分天+顺路（高德真实街道时间），
+    再由 LLM 填软字段（时间段/人均cost/说明）。返回 {day_plans, daily_centers}。
+    budget_advice 非空时压低花费。候选为空时返回空行程。"""
+    candidates = select_candidates(attractions or [], days)
+    if not candidates:
+        return {"day_plans": [], "daily_centers": []}
+
+    # depot = 候选质心，作为 0 号节点
+    cx = sum(c["lng"] for c in candidates) / len(candidates)
+    cy = sum(c["lat"] for c in candidates) / len(candidates)
+    depot = {"poi_id": "__depot__", "lng": cx, "lat": cy}
+    nodes = [depot] + candidates
+
+    matrix = await duration_matrix(nodes, _distance_cache_path())
+    routes = solve_vrptw(matrix, days)  # 每天节点索引(指向 nodes，0=depot)
+    skeleton = routes_to_day_plans(routes, candidates)  # assembler 用 1-based 指向 candidates
+
+    # 每天活动中心 = 当天景点质心
+    daily_centers = []
+    for day_plan in skeleton:
+        items = day_plan.get("items", [])
+        if items:
+            dx = sum(it["location"]["lng"] for it in items) / len(items)
+            dy = sum(it["location"]["lat"] for it in items) / len(items)
+        else:
+            dx = dy = 0.0
+        daily_centers.append({"lng": dx, "lat": dy})
+
+    # soft_fill：LLM 填时间/cost/note + 就近插餐厅，不改顺序与分天
+    payload = {
+        "skeleton": skeleton, "restaurants": restaurants or [], "weather": weather or {},
+        "start_date": start_date, "num_people": max(1, num_people),
+    }
+    if budget_advice:
+        payload["budget_advice"] = budget_advice
+    llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
+    result = await llm.ainvoke([
+        SystemMessage(content=ITINERARY_SYS),
+        HumanMessage(content=str(payload)),
+    ])
+    return {
+        "day_plans": [d.model_dump(by_alias=True) for d in result.days],
+        "daily_centers": daily_centers,
+    }
+
+
+@tool
+async def assign_hotels(city: str, day_plans: list, level: str = "舒适",
+                        daily_centers: list | None = None) -> list:
+    """为过夜日就近分配酒店并嵌入 day_plans。返回更新后的 day_plans；单日游/无行程原样返回。"""
+    nights = overnight_days(day_plans)
+    if not nights:
+        return day_plans
+    try:
+        pool = await amap.search_poi(city, hotel_keyword(level), "住宿服务") if city else []
+    except Exception:  # noqa: BLE001
+        pool = []
+    payload = {"overnight_days": nights, "level": level,
+               "daily_centers": daily_centers or [], "hotel_pool": pool}
+    llm = build_llm(temperature=0).with_structured_output(_AccoResult, method="function_calling")
+    result = await llm.ainvoke([
+        SystemMessage(content=ACCO_SYS),
+        HumanMessage(content=str(payload)),
+    ])
+    assignments = [{"day": a.day, "hotel": a.hotel.model_dump(by_alias=True)}
+                   for a in result.assignments]
+    return attach_hotels(day_plans, assignments)
