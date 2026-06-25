@@ -94,3 +94,29 @@ async def plan_route(origin: str, dest: str, mode: str = "transit") -> dict:
             return r.json().get("route", {}) or {}
     except Exception:  # noqa: BLE001
         return {}
+
+
+@traceable(run_type="tool", name="amap_distance_batch")
+async def distance_batch(origins: list[str], destination: str, type_: str = "1") -> list[dict]:
+    """批量距离：origins(<=100 个 "lng,lat") -> destination。返回 [{origin_id,dest_id,distance,duration}]；失败 []。"""
+    if not origins or not destination:
+        return []
+    try:
+        async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
+            r = await client.get(f"{_BASE}/distance", params={
+                "key": _key(), "origins": "|".join(origins),
+                "destination": destination, "type": type_,
+            })
+            r.raise_for_status()
+            data = r.json()
+        out = []
+        for it in data.get("results", []) or []:
+            out.append({
+                "origin_id": int(it.get("origin_id", 0)),
+                "dest_id": int(it.get("dest_id", 1)),
+                "distance": float(it.get("distance", 0) or 0),
+                "duration": float(it.get("duration", 0) or 0),
+            })
+        return out
+    except Exception:  # noqa: BLE001 —— 降级
+        return []
