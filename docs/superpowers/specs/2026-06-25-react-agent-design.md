@@ -171,7 +171,7 @@ trip_agent = create_agent(
 
 - `messages`（`add_messages`）：agent 循环的 tool-calling 消息历史天然落在这里。
 - `day_plans` / `changed_days` / `plan_version` / `budget_check`：tool 写入，契约不变。
-- 移除/弱化：`refine_request`、`clarified` / `clarify_round`、`last_intent` 等「固定编排专用」字段在 ReAct 下不再驱动路由（可保留为兼容字段，避免 checkpointer 老状态反序列化炸裂，但不再读）。
+- **直接删除**（代码简洁要求）：`refine_request`、`clarified` / `clarify_round`、`last_intent`、`normalized_req`、`budget_advice`、`retry_count`、`daily_centers` 等「固定编排专用」字段从 `TripState` 类型定义中删掉，不留兼容占位。Task 0 实测：LangGraph `TypedDict` 对 checkpointer 反序列化出的多余键通常忽略、不抛错；若实测炸裂，则在 build_graph 加载时清洗或接受老会话丢弃（开发期数据为测试数据）。删字段前先全仓 grep 确认无残余读点。
 
 ### 4.2 一次请求的数据流（首次规划，含自主澄清）
 
@@ -268,6 +268,8 @@ def build_graph(checkpointer=None):
 - 不把攻略文案生成塞进 agent（保留独立 summarize）。
 - 不引入 LangGraph middleware 的高级特性（PII/guardrails 等），除非验证 `create_agent` 的 HITL 必须经 middleware 才能 interrupt。
 
+> 注：死代码删除（§11）属于本次范围内的收尾工作，不是 YAGNI 排除项——用户明确要求重构后保证代码简洁、不留兼容占位。
+
 ## 9. 迁移与风险
 
 | 风险 | 缓解 |
@@ -275,16 +277,55 @@ def build_graph(checkpointer=None):
 | 子图 interrupt 不冒泡到外层 → ask_user 暂停失效 | 计划 Task 0 真实环境验证；若不冒泡，改用外层包一层 interrupt 转发或 middleware HITL |
 | LLM 不调确定性 tool、自己瞎算费用/分天 → 业务回归 | 系统提示强约束「费用/分天/过夜必须调对应 tool」；端到端测试卡口 |
 | `create_agent` 版本/bug（prebuilt 1.0.5） | Task 0 验证 + 必要时锁版本 |
-| checkpointer 老状态字段不兼容 | 保留弃用字段为兼容占位，不删 TripState 键 |
+| checkpointer 老状态字段不兼容（已直接删字段） | Task 0 实测老会话反序列化；TypedDict 多余键通常忽略；炸则加载清洗或丢弃测试期老会话 |
 | LLM 自主提问过多/死循环追问 | 系统提示「同一字段不重复问」+ 软去重；recursion_limit 兜底 |
 | 重构期前后端进度标签错位 | §5.3 同步更新 NODES/标签；契约事件不动 |
 
 ## 10. 实现顺序（交 writing-plans 细化）
 
-0. 真实环境验证 `create_agent` import/签名/子图 interrupt 冒泡/版本 bug。
-1. 抽确定性纯函数为独立可测单元（`diff_changed_days` 新增；聚类/预算/过夜复用）。
+0. 真实环境验证 `create_agent` import/签名/子图 interrupt 冒泡/版本 bug + 老 checkpointer 会话反序列化兼容。
+1. 抽确定性纯函数为独立可测单元（迁入 `tools/` 或 `core/`；`diff_changed_days` 新增；聚类/预算/过夜复用）。
 2. 实现工具层（检索/编排/核算/ask_user/finalize_plan）+ 单测。
 3. 组装 `trip_agent`（create_agent + 系统提示）。
-4. 重构 `build_graph` 外层图 + `stream.py` 节点集合。
+4. 重构 `build_graph` 外层图 + `stream.py` + `constants.py` 节点/标签集合 + `memory_update` receipt 改写（不再读意图字段）+ `TripState` 瘦身。
 5. 端到端 + 流式契约测试。
 6. 前端进度标签对齐。
+7. **死代码清理**（§11）：删除 §11 清单中所有不再进图的节点文件，全仓 grep 确认无残余 import/读点，跑全量测试绿。
+
+## 11. 死代码删除清单（代码简洁要求）
+
+重构后下列代码不再使用，确定性纯函数迁出后**整文件删除**，不留兼容占位。删除前对每个符号全仓 `grep` 确认无残余引用，删除后跑全量测试。
+
+### 11.1 整文件删除（无可复用逻辑或逻辑已迁走）
+
+| 文件 | 处理 | 去向 |
+|---|---|---|
+| `graph/nodes/dispatch_agent.py` | 删 | 意图分流由 ReAct 循环取代；`IntentResult`/`_rule_based_intent`/`_infer_op`/`_parse_refine` 全废弃 |
+| `graph/nodes/dispatch.py` | 删 | `NormalizedReq` 标准化能力并入 agent 系统提示 + tool 参数；不再需要独立节点 |
+| `graph/nodes/clarify.py` | 删 | 澄清改为 `ask_user` tool；`_evaluate_gaps`/`ClarifyGaps`/`MAX_CLARIFY_ROUNDS` 关卡废弃 |
+| `graph/nodes/retrieve.py` | 删 | fan-out 锚点不再需要（检索改 tool 按需调） |
+| `graph/nodes/refine.py` | 删 | 局部修改由 ReAct + assemble/finalize 取代；`RefineRequest`/各 `_*_day` 助手废弃 |
+| `graph/nodes/routing.py` | 删 | `route_after_plan`/`route_after_accommodation` 规则路由废弃（路由权交 LLM） |
+| `graph/nodes/answer.py` | 删 | QA 由 ReAct 循环（不调 finalize_plan）+ summarize 取代 |
+| `graph/nodes/weather.py` / `attractions.py` / `restaurants.py` / `transport.py` | 删 | 4 个检索节点逻辑并入对应检索 tool（tool 直接调 `amap.*`） |
+
+### 11.2 纯函数迁出后删文件
+
+| 文件 | 迁出符号（保留，移入 tools/core） | 文件本身 |
+|---|---|---|
+| `graph/nodes/itinerary.py` | `cluster_by_day` / `_nearest_neighbor_order` / `_dist` / `DayPlan` 等 Pydantic schema / `_SYS` 编排提示 / `_build_payload` | 迁出后删 |
+| `graph/nodes/budget.py` | `compute_budget` / `_sum_costs` / `_pick_cut_suggestions` / `_MAX_RETRY` | 迁出后删 |
+| `graph/nodes/accommodation.py` | `overnight_days` / `attach_hotels` / `hotel_keyword` / `Hotel`·`_AccoResult` schema / `_SYS` | 迁出后删 |
+
+### 11.3 保留并改写
+
+| 文件 | 处理 |
+|---|---|
+| `graph/nodes/memory.py` | 并入 `context_prep`（可改名）；逻辑保留 |
+| `graph/nodes/memory_update.py` | **改写** receipt：`_assistant_receipt` 不再读 `last_intent`/`normalized_req`，改为基于 `changed_days`/`day_plans` 是否存在推断文案 |
+| `graph/nodes/summarize.py` | 沿用，零改动 |
+| `graph/state.py` | 瘦身：删 §4.1 列出的废弃字段 |
+| `graph/builder.py` | 重写为 §5.1 四节点外层图 |
+| `graph/stream.py` | 改 §5.2：节点集合更新；契约事件不动 |
+| `core/constants.py` | 清理：`NODES`/`NODE_LABELS` 改为新四节点集合；删 `MAX_CLARIFY_ROUNDS`；评估删 `EVENT_INTENT`（若前端不再用）；`EVENT_CLARIFY`/`EVENT_PLAN_PATCH` 保留 |
+| `tools/amap.py` | 复用，零改动 |
