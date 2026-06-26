@@ -67,7 +67,11 @@ export function useSSE() {
             loading.value = false
             break
           case 'error':
-            ElMessage.error((data as ErrorPayload).message || '生成失败')
+            {
+              const message = (data as ErrorPayload).message || '生成失败'
+              tripStore.addMessage('assistant', message, 'error')
+              ElMessage.error(message)
+            }
             loading.value = false
             break
           default:
