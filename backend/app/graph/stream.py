@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.constants import (
     EVENT_SESSION, EVENT_NODE_START, EVENT_TOKEN, EVENT_NODE_END,
-    EVENT_CLARIFY, EVENT_FINAL, EVENT_ERROR, EVENT_PLAN_PATCH, EVENT_TITLE, NODES, NODE_LABELS,
+    EVENT_CLARIFY, EVENT_FINAL, EVENT_ERROR, EVENT_PLAN_PATCH, EVENT_TITLE, NODE_LABELS,
     EVENT_TOOL_CALL, EVENT_TOOL_RESULT, TOOL_LABELS,
 )
 from app.services.session_store import DEFAULT_TITLE, title_from_message
@@ -82,9 +82,9 @@ async def sse_events(message: str, thread_id: str | None, request):
                 yield _sse(EVENT_TOOL_CALL, {"tool": name, "label": TOOL_LABELS.get(name, name)})
             elif kind == "on_tool_end":
                 yield _sse(EVENT_TOOL_RESULT, {"tool": name, "label": TOOL_LABELS.get(name, name)})
-            elif kind == "on_chain_start" and name in NODES:
-                yield _sse(EVENT_NODE_START, {"node": name, "label": NODE_LABELS.get(name, "")})
-            elif kind == "on_chain_end" and name in NODES:
+            elif kind == "on_chain_start" and name in NODE_LABELS:
+                yield _sse(EVENT_NODE_START, {"node": name, "label": NODE_LABELS[name]})
+            elif kind == "on_chain_end" and name in NODE_LABELS:
                 yield _sse(EVENT_NODE_END, {"node": name})
 
         # 流后判定：暂停等澄清 or 编排完成

@@ -10,7 +10,7 @@
       >
         <span v-if="step.status === 'running'" class="loading-icon"></span>
         <span v-else class="done-icon">✓</span>
-        <span class="node-label">{{ step.status === 'done' ? '已' : '正在' }}{{ step.label }}</span>
+        <span class="node-label">{{ step.label }}</span>
       </div>
     </transition-group>
   </div>

@@ -19,14 +19,12 @@ EVENT_PLAN_PATCH = "plan_patch"  # data: {"plan_version","changed_days"} —— 
 EVENT_TOOL_CALL = "tool_call"      # data: {"tool","label"} —— 工具开始执行
 EVENT_TOOL_RESULT = "tool_result"  # data: {"tool","label"} —— 工具执行结束
 
-# 图节点全集（create_agent 内部节点：model 决策/回复、tools 执行）
-NODES = {"agent", "model", "tools"}
-
-# node_start 携带的友好阶段文案（agent 内部节点较少，仅作兜底）
+# node_start 携带的友好阶段文案。只有列在这里的节点才会发 node_start/node_end，
+# 用于 model 决策阶段的瞬态提示；tools 阶段由具体工具 pill（tool_call/tool_result）
+# 表达，不在此列，避免与工具链冲突。
 NODE_LABELS = {
     "agent": "正在思考...",
     "model": "正在思考...",
-    "tools": "正在调用工具...",
 }
 
 # 工具名 → 前端展示的友好中文文案（用于 tool_call / tool_result 过程链）
