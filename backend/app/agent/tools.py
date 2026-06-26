@@ -2,7 +2,7 @@
 """ReAct Agent 工具箱。每个 tool = LLM 可调接口 + 内部确定性实现。
 
 检索类直接复用 app/tools/amap.py（失败降级，不抛）。
-编排/核算/收尾类见后续步骤；ask_user 经 interrupt 暂停。
+编排/核算/收尾类见后续步骤。
 """
 import json
 import os
@@ -12,7 +12,7 @@ from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import InjectedToolCallId
 from langgraph.prebuilt import InjectedState
-from langgraph.types import Command, interrupt
+from langgraph.types import Command
 
 from app.tools import amap
 from app.agent.budgeting import compute_budget
@@ -163,14 +163,6 @@ async def compute_budget_tool(day_plans: list, num_people: int = 1, limit: float
         "messages": [ToolMessage(
             json.dumps(summary, ensure_ascii=False), tool_call_id=tool_call_id)],
     })
-
-
-@tool
-def ask_user(field: str, question: str, options: list | None = None) -> str:
-    """信息不足以规划时向用户提问并暂停，等待用户回答。
-    field 是缺失要素名（如 city/days/budget），options 为单选项（开放式留空）。"""
-    answer = interrupt({"field": field, "question": question, "options": options or []})
-    return answer
 
 
 @tool

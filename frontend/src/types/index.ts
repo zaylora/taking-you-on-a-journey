@@ -17,7 +17,6 @@ export interface ErrorPayload { message: string }
 export interface SessionPayload { thread_id: string }
 export interface TitlePayload { thread_id: string; title: string }
 export interface PlanPatchPayload { plan_version: number; changed_days: number[] }
-export interface ClarifyPayload { field: string; question: string; options: string[] }
 
 export interface SessionListItem {
   thread_id: string
@@ -30,7 +29,7 @@ export interface SessionSnapshot extends SessionListItem {
   messages: Array<{
     role: 'user' | 'assistant'
     content: string
-    kind?: 'text' | 'clarify' | 'error'
+    kind?: 'text' | 'error'
     tool_steps?: Array<{ tool: string; label: string; status: 'done' }>
   }>
   day_plans: DayPlan[]
@@ -72,5 +71,5 @@ export interface DayPlan {
 
 export type EventName =
   | 'session' | 'title' | 'plan_patch' | 'intent'
-  | 'node_start' | 'token' | 'node_end' | 'clarify' | 'final' | 'error'
+  | 'node_start' | 'token' | 'node_end' | 'final' | 'error'
   | 'tool_call' | 'tool_result';

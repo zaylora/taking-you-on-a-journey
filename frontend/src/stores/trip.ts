@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { createSession, getSession, listSessions } from '../api/sessions'
-import type { ClarifyPayload, DayPlan, Budget, TripItem, SessionSnapshot } from '../types'
+import type { DayPlan, Budget, TripItem, SessionSnapshot } from '../types'
 
 export interface ToolStep {
   tool: string
@@ -12,7 +12,7 @@ export interface ToolStep {
 export interface Message {
   role: 'user' | 'assistant'
   content: string
-  kind?: 'text' | 'clarify' | 'error'
+  kind?: 'text' | 'error'
   toolSteps?: ToolStep[]
 }
 
@@ -60,7 +60,6 @@ export const useTripStore = defineStore('trip', () => {
   const nodeLabels = ref<Record<string, string>>({})
   // 工具调用过程链：按发生顺序记录每次工具调用及其状态（running→done）
   const toolSteps = ref<Array<{ tool: string; label: string; status: 'running' | 'done' }>>([])
-  const clarifyPending = ref<ClarifyPayload | null>(null)
 
   const activeConversation = computed(() =>
     conversations.value.find((c) => c.threadId === activeThreadId.value) ?? null,
@@ -113,7 +112,6 @@ export const useTripStore = defineStore('trip', () => {
     activeThreadId.value = id
     if (id) localStorage.setItem(STORAGE_KEY, id)
     else localStorage.removeItem(STORAGE_KEY)
-    clarifyPending.value = null
     clearProgress()
   }
 
@@ -145,7 +143,7 @@ export const useTripStore = defineStore('trip', () => {
     if (preferred) await loadConversation(preferred)
   }
 
-  const addMessage = (role: 'user' | 'assistant', content: string, kind: 'text' | 'clarify' | 'error' = 'text') => {
+  const addMessage = (role: 'user' | 'assistant', content: string, kind: 'text' | 'error' = 'text') => {
     activeConversation.value?.messages.push({ role, content, kind })
   }
 
@@ -160,14 +158,14 @@ export const useTripStore = defineStore('trip', () => {
   }
   const endNode = (node: string) => { agentProgress.value[node] = 'done' }
 
-  // 取得当前可追加的 assistant 占位消息：最后一条是 assistant 且非澄清气泡则复用，
+  // 取得当前可追加的 assistant 占位消息：最后一条是 assistant 则复用，
   // 否则新建一条空 assistant 消息。保证实时流的工具链/正文始终挂在同一条消息上，
   // 与历史快照「单条消息内聚合」的形态一致。
   const ensureAssistantMessage = (): Message | null => {
     const current = activeConversation.value
     if (!current) return null
     const last = current.messages[current.messages.length - 1]
-    if (last && last.role === 'assistant' && last.kind !== 'clarify') return last
+    if (last && last.role === 'assistant') return last
     const msg: Message = { role: 'assistant', content: '', kind: 'text' }
     current.messages.push(msg)
     return msg
@@ -207,12 +205,6 @@ export const useTripStore = defineStore('trip', () => {
     const conversation = conversations.value.find((c) => c.threadId === id)
     if (conversation) conversation.title = title
   }
-
-  const setClarify = (c: ClarifyPayload) => {
-    clarifyPending.value = c
-    addMessage('assistant', c.question, 'clarify')
-  }
-  const clearClarify = () => { clarifyPending.value = null }
 
   const setDayPlans = (plans: DayPlan[]) => {
     const current = activeConversation.value
@@ -265,13 +257,13 @@ export const useTripStore = defineStore('trip', () => {
 
   return {
     conversations, activeThreadId, activeConversation,
-    messages, agentProgress, nodeLabels, threadId, dayPlans, clarifyPending,
+    messages, agentProgress, nodeLabels, threadId, dayPlans,
     toolSteps,
     activeDay, activePoiId, activeTransport, budget,
     loadConversations, loadConversation, createConversation, ensureConversation,
     addMessage, appendToLastMessage, startNode, endNode, clearProgress,
     startToolCall, endToolCall,
-    setThreadId, setTitle, setClarify, clearClarify, setDayPlans, setActiveDay,
+    setThreadId, setTitle, setDayPlans, setActiveDay,
     setActivePoi, setActiveTransport, setBudget, setPlanVersion, touchActive,
   }
 })

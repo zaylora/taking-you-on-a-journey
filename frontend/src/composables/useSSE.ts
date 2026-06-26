@@ -4,7 +4,7 @@ import { useTripStore } from '../stores/trip'
 import { ElMessage } from 'element-plus'
 import type {
   EventName, NodeStartPayload, TokenPayload, NodeEndPayload,
-  ErrorPayload, SessionPayload, ClarifyPayload, FinalPayload,
+  ErrorPayload, SessionPayload, FinalPayload,
   TitlePayload, PlanPatchPayload, ToolCallPayload, ToolResultPayload,
 } from '../types'
 
@@ -20,7 +20,6 @@ export function useSSE() {
     try {
       const activeThreadId = await tripStore.ensureConversation()
       tripStore.addMessage('user', message)
-      tripStore.clearClarify()
       tripStore.clearProgress()
       abortController = new AbortController()
 
@@ -57,10 +56,6 @@ export function useSSE() {
             break
           case 'token':
             tripStore.appendToLastMessage((data as TokenPayload).text)
-            break
-          case 'clarify':
-            tripStore.setClarify(data as ClarifyPayload)
-            loading.value = false
             break
           case 'final':
             tripStore.setDayPlans((data as FinalPayload).day_plans || [])

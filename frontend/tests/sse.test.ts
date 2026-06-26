@@ -12,8 +12,11 @@ test('parses CRLF-delimited SSE events', async () => {
     'event: session\r\n',
     'data: {"thread_id":"abc"}\r\n',
     '\r\n',
-    'event: clarify\r\n',
-    'data: {"field":"city","question":"你想去哪？","options":[]}\r\n',
+    'event: token\r\n',
+    'data: {"text":"你想去哪？"}\r\n',
+    '\r\n',
+    'event: final\r\n',
+    'data: {"answer":"你想去哪？"}\r\n',
     '\r\n',
   ].join('')
   const events: Array<{ event: string; data: any }> = []
@@ -26,6 +29,7 @@ test('parses CRLF-delimited SSE events', async () => {
 
   expect(events).toEqual([
     { event: 'session', data: { thread_id: 'abc' } },
-    { event: 'clarify', data: { field: 'city', question: '你想去哪？', options: [] } },
+    { event: 'token', data: { text: '你想去哪？' } },
+    { event: 'final', data: { answer: '你想去哪？' } },
   ])
 })

@@ -8,7 +8,7 @@
       <div class="avatar">
         {{ msg.role === 'user' ? 'U' : 'AI' }}
       </div>
-      <div class="content" :class="{ 'clarify-bubble': msg.kind === 'clarify' }">
+      <div class="content" :class="{ 'error-bubble': msg.kind === 'error' }">
         <AgentProgress
           v-if="msg.role === 'assistant' && msg.toolSteps?.length"
           :tool-steps="msg.toolSteps"
@@ -18,13 +18,18 @@
           class="markdown-body"
           v-html="renderMarkdown(msg.content)"
         ></div>
+        <!-- 内联思考提示：工具链已收尾(全部 ✓)但正文尚未开始的间隙，
+             或工具间的思考窗口，仍提示 Agent 在工作，避免界面"卡住" -->
+        <div v-if="inlineThinking(msg, index)" class="thinking-bubble">
+          <span class="loading-icon"></span>
+          <span>{{ thinkingLabel }}</span>
+        </div>
       </div>
     </div>
 
-    <!-- 瞬态阶段提示：展示后端 node_start 发来的阶段 label（如"正在思考..."），
-         仅 loading 期间、最后一条尚无工具链/正文时出现，不写入消息数组，
-         避免破坏实时与历史一致；工具链出现后由 pill 表达进度 -->
-    <div v-if="showThinking" class="message assistant">
+    <!-- 独立思考气泡：尚无 assistant 占位消息（最后一条仍是用户）时，
+         给出阶段提示，不写入消息数组，避免破坏实时与历史一致 -->
+    <div v-if="showStandaloneThinking" class="message assistant">
       <div class="avatar">AI</div>
       <div class="content thinking-bubble">
         <span class="loading-icon"></span>
@@ -54,14 +59,27 @@ const renderMarkdown = (text: unknown) => {
 
 const tripStore = useTripStore()
 
-// loading 中且最后一条消息还没有任何可显示进度（工具链或正文）时，
-// 给出阶段提示。一旦工具链或正文出现即隐藏。
-const showThinking = computed(() => {
-  if (!props.loading) return false
+// 是否存在可复用的 assistant 占位消息（最后一条是 assistant）
+const hasAssistantPlaceholder = computed(() => {
   const last = props.messages[props.messages.length - 1]
-  if (last && last.role === 'assistant' && (last.toolSteps?.length || last.content)) return false
-  return true
+  return !!(last && last.role === 'assistant')
 })
+
+// 独立气泡：loading 中且还没有 assistant 占位消息时（首个工具/正文到达前）
+const showStandaloneThinking = computed(() => {
+  return props.loading && !hasAssistantPlaceholder.value
+})
+
+// 内联提示：仅对最后一条 assistant 消息生效。loading 中、正文尚未开始、
+// 且没有正在 running 的工具（工具间或工具收尾后的思考窗口）时展示。
+const inlineThinking = (msg: Message, index: number) => {
+  if (!props.loading) return false
+  if (index !== props.messages.length - 1) return false
+  if (msg.role !== 'assistant') return false
+  if (msg.content) return false
+  if (msg.toolSteps?.some((s) => s.status === 'running')) return false
+  return true
+}
 
 // 取当前正在 running 的 node 的后端 label，无则回退"正在思考…"
 const thinkingLabel = computed(() => {
@@ -75,7 +93,7 @@ const thinkingLabel = computed(() => {
 
 const listRef = ref<HTMLElement | null>(null)
 
-watch([() => props.messages, showThinking, () => props.loading], () => {
+watch([() => props.messages, showStandaloneThinking, () => props.loading], () => {
   nextTick(() => {
     if (listRef.value) {
       listRef.value.scrollTop = listRef.value.scrollHeight
@@ -128,7 +146,7 @@ watch([() => props.messages, showThinking, () => props.loading], () => {
 .message.user .content {
   background: #ecf5ff;
 }
-.content.clarify-bubble { background: #fdf6ec; border: 1px solid #f5dab1; color: #b88230; }
+.content.error-bubble { background: #fef0f0; border: 1px solid #fde2e2; color: #c45656; }
 
 /* 瞬态思考气泡 */
 .thinking-bubble {
@@ -136,6 +154,10 @@ watch([() => props.messages, showThinking, () => props.loading], () => {
   align-items: center;
   gap: 8px;
   color: var(--el-text-color-regular, #606266);
+}
+/* 内联在已有工具链/正文之后时，与上方内容留出间距 */
+.content > .thinking-bubble:not(:first-child) {
+  margin-top: 8px;
 }
 .thinking-bubble .loading-icon {
   width: 12px;

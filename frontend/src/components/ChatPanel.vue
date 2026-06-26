@@ -21,7 +21,6 @@
       <el-tag round type="info" class="prompt-chip" @click="send('推荐一些当地美食')">推荐一些当地美食</el-tag>
       <el-tag round type="info" class="prompt-chip" @click="send('调整为 7 天行程')">调整为 7 天行程</el-tag>
     </div>
-    <ClarifyOptions :send="send" />
     <ChatInput :loading="loading" @send="send" @abort="abort" />
   </div>
 </template>
@@ -31,7 +30,6 @@ import { useTripStore } from '../stores/trip'
 import { useSSE } from '../composables/useSSE'
 import MessageList from './MessageList.vue'
 import ChatInput from './ChatInput.vue'
-import ClarifyOptions from './ClarifyOptions.vue'
 
 const tripStore = useTripStore()
 const { loading, send, abort } = useSSE()

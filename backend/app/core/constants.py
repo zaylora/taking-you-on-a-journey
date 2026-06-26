@@ -11,7 +11,6 @@ EVENT_FINAL = "final"            # data: {"answer": "完整回答文本"} ——
 EVENT_ERROR = "error"            # data: {"message": "用户可读的错误"}（脱敏）
 
 EVENT_SESSION = "session"   # data: {"thread_id": "<hex>"} —— 新会话首帧
-EVENT_CLARIFY = "clarify"   # data: {"field","question","options"} —— 暂停等澄清
 EVENT_TITLE = "title"       # data: {"thread_id","title"} —— 会话标题更新
 EVENT_INTENT = "intent"     # data: {"intent"} —— M5 意图调试/进度
 EVENT_PLAN_PATCH = "plan_patch"  # data: {"plan_version","changed_days"} —— 局部更新提示
@@ -36,6 +35,5 @@ TOOL_LABELS = {
     "assemble_itinerary": "编排逐日行程",
     "assign_hotels": "安排住宿",
     "compute_budget_tool": "核算预算",
-    "ask_user": "向你确认信息",
     "finalize_plan": "确认行程",
 }
