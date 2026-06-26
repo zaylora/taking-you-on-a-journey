@@ -6,13 +6,15 @@
 """
 import json
 import os
-from typing import Annotated
+import ast
+from typing import Annotated, Any
 
 from langchain_core.tools import tool
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import InjectedToolCallId
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
+from pydantic import BaseModel, Field, field_validator
 
 from app.tools import amap
 from app.agent.budgeting import compute_budget
@@ -27,6 +29,87 @@ from app.agent.lodging import (
     overnight_days, attach_hotels, hotel_keyword, _AccoResult, ACCO_SYS,
 )
 from app.llm.factory import build_llm
+
+
+def _parse_jsonish_string(value: Any) -> Any:
+    if not isinstance(value, str):
+        return value
+    text = value.strip()
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return ast.literal_eval(text)
+
+
+class AssembleItineraryArgs(BaseModel):
+    """编排行程工具输入。字段说明会暴露给模型用于生成工具调用参数。"""
+
+    city: str = Field(description="目标城市名称，如 广州。")
+    days: int = Field(ge=1, description="规划天数，必须是正整数。")
+    attractions: list[dict[str, Any]] = Field(
+        description=(
+            "景点 POI 数组，优先传 search_attractions 的返回结果原生数组；"
+            "每项通常包含 name、poi_id、lng、lat、address、type。不要传字符串。"
+        )
+    )
+    restaurants: list[dict[str, Any]] = Field(
+        description=(
+            "餐厅 POI 数组，优先传 search_restaurants 的返回结果原生数组；"
+            "可为空数组。不要传字符串。"
+        )
+    )
+    weather: dict[str, Any] = Field(
+        description="天气对象，优先传 get_weather 的返回结果原生对象；不要传字符串。"
+    )
+    start_date: str = Field(
+        default="",
+        description="行程开始日期，格式 YYYY-MM-DD；未知可传空字符串。",
+    )
+    num_people: int = Field(default=1, ge=1, description="出行人数，必须是正整数。")
+    budget_advice: dict[str, Any] | None = Field(
+        default=None,
+        description=(
+            "预算建议对象，来自预算工具返回的 cut_suggestions / over_amount，"
+            "用于重新编排行程时压低花费。必须传 JSON 对象或 null；不要传字符串，"
+            "不要传 \"None\"，也不要传序列化后的 JSON 字符串。"
+        ),
+    )
+
+    @field_validator("budget_advice", mode="before")
+    @classmethod
+    def _coerce_budget_advice(cls, value: Any) -> Any:
+        return _parse_jsonish_string(value)
+
+
+class AssignHotelsArgs(BaseModel):
+    """住宿分配工具输入。字段说明会暴露给模型用于生成工具调用参数。"""
+
+    city: str = Field(description="住宿所在城市名称，如 广州。")
+    day_plans: list[dict[str, Any]] = Field(
+        description=(
+            "逐日行程数组，传 assemble_itinerary 或已有最终行程里的 day_plans 原生数组；"
+            "不要传字符串。"
+        )
+    )
+    level: str = Field(
+        default="舒适",
+        description="住宿档位：经济、舒适或高端；用户未指定时默认舒适。",
+    )
+    daily_centers: list[dict[str, Any]] | None = Field(
+        default=None,
+        description=(
+            "每天活动中心坐标数组，来自 assemble_itinerary 返回的 daily_centers 原样传入；"
+            "每项通常包含 lng、lat。必须传 JSON 数组或 null；不要传字符串，"
+            "不要传序列化后的 JSON 字符串。"
+        ),
+    )
+
+    @field_validator("daily_centers", mode="before")
+    @classmethod
+    def _coerce_daily_centers(cls, value: Any) -> Any:
+        return _parse_jsonish_string(value)
 
 
 def _distance_cache_path() -> str:
@@ -72,7 +155,7 @@ async def plan_route(origin: str, dest: str, mode: str = "transit") -> dict:
         return {}
 
 
-@tool
+@tool(args_schema=AssembleItineraryArgs)
 async def assemble_itinerary(city: str, days: int, attractions: list, restaurants: list,
                              weather: dict, start_date: str = "", num_people: int = 1,
                              budget_advice: dict | None = None) -> dict:
@@ -122,7 +205,7 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
     }
 
 
-@tool
+@tool(args_schema=AssignHotelsArgs)
 async def assign_hotels(city: str, day_plans: list, level: str = "舒适",
                         daily_centers: list | None = None) -> list:
     """为过夜日就近分配酒店并嵌入 day_plans。返回更新后的 day_plans；单日游/无行程原样返回。"""

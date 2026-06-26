@@ -7,6 +7,10 @@ from app.agent.lodging import _AccoResult
 from tests.conftest import make_fake_build_llm
 
 
+def _schema_property(tool_obj, field_name: str) -> dict:
+    return tool_obj.args_schema.model_json_schema()["properties"][field_name]
+
+
 @pytest.mark.asyncio
 async def test_search_attractions_returns_pois(fake_amap):
     fake_amap["search_poi"] = [{"name": "故宫", "poi_id": "p1", "lng": 116.4, "lat": 39.9}]
@@ -64,12 +68,65 @@ async def test_assemble_itinerary_empty_candidates(fake_amap, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_assemble_itinerary_accepts_stringified_budget_advice(fake_amap, monkeypatch):
+    monkeypatch.setattr("app.agent.tools.build_llm",
+                        make_fake_build_llm(structured=DayPlans(days=[])))
+    out = await tools.assemble_itinerary.ainvoke({
+        "city": "佛山",
+        "days": 2,
+        "attractions": [],
+        "restaurants": [],
+        "weather": {"text": "雨"},
+        "budget_advice": "{'over_amount': 100.0, 'cut_suggestions': []}",
+    })
+
+    assert out["day_plans"] == []
+    assert out["daily_centers"] == []
+
+
+def test_assemble_itinerary_schema_describes_budget_advice_as_object_not_string():
+    budget_advice = _schema_property(tools.assemble_itinerary, "budget_advice")
+    description = budget_advice.get("description", "")
+
+    assert "对象" in description
+    assert "不要" in description
+    assert "字符串" in description
+    assert "cut_suggestions" in description
+
+
+@pytest.mark.asyncio
 async def test_assign_hotels_embeds(fake_amap, monkeypatch):
     res = _AccoResult(assignments=[{"day": 1, "hotel": {"name": "如家", "price": 300, "level": "经济"}}])
     monkeypatch.setattr("app.agent.tools.build_llm", make_fake_build_llm(structured=res))
     dps = [{"day": 1, "items": []}, {"day": 2, "items": []}]  # 过夜日=第1天
     out = await tools.assign_hotels.ainvoke({"city": "北京", "day_plans": dps, "level": "经济"})
     assert out[0]["hotel"]["name"] == "如家"
+
+
+@pytest.mark.asyncio
+async def test_assign_hotels_accepts_stringified_daily_centers(fake_amap, monkeypatch):
+    res = _AccoResult(assignments=[{"day": 1, "hotel": {"name": "如家", "price": 300, "level": "经济"}}])
+    monkeypatch.setattr("app.agent.tools.build_llm", make_fake_build_llm(structured=res))
+    dps = [{"day": 1, "items": []}, {"day": 2, "items": []}]
+
+    out = await tools.assign_hotels.ainvoke({
+        "city": "佛山",
+        "day_plans": dps,
+        "level": "舒适",
+        "daily_centers": "[{'lng': 113.271077, 'lat': 22.780128}]",
+    })
+
+    assert out[0]["hotel"]["name"] == "如家"
+
+
+def test_assign_hotels_schema_describes_daily_centers_as_array_not_string():
+    daily_centers = _schema_property(tools.assign_hotels, "daily_centers")
+    description = daily_centers.get("description", "")
+
+    assert "数组" in description
+    assert "assemble_itinerary" in description
+    assert "不要" in description
+    assert "字符串" in description
 
 
 from langgraph.types import Command as _Command
