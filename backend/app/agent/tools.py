@@ -112,6 +112,29 @@ class AssignHotelsArgs(BaseModel):
         return _parse_jsonish_string(value)
 
 
+class PlanRouteArgs(BaseModel):
+    """路径规划工具输入。字段说明会暴露给模型用于生成工具调用参数。"""
+
+    origin: str = Field(
+        description=(
+            "起点坐标字符串，必须是高德坐标 \"lng,lat\" 格式，如 "
+            "\"116.481499,39.990475\"。优先从 POI 返回或 day_plans 中的 "
+            "lng/lat 拼接；不要传地名、POI 名称或地址。"
+        )
+    )
+    dest: str = Field(
+        description=(
+            "终点坐标字符串，必须是高德坐标 \"lng,lat\" 格式，如 "
+            "\"116.465063,39.999538\"。优先从 POI 返回或 day_plans 中的 "
+            "lng/lat 拼接；不要传地名、POI 名称或地址。"
+        )
+    )
+    mode: str = Field(
+        default="transit",
+        description="交通方式，默认 transit；当前后端按高德公交路径规划请求处理。",
+    )
+
+
 def _distance_cache_path() -> str:
     """由 checkpoint 库路径派生同目录下独立的距离缓存库文件名。"""
     ckpt = get_settings().checkpoint_db_path
@@ -146,9 +169,9 @@ async def get_weather(city: str) -> dict:
         return {"text": "以当季气候为准", "temp": "", "is_rainy": False, "source": "climate"}
 
 
-@tool
+@tool(args_schema=PlanRouteArgs)
 async def plan_route(origin: str, dest: str, mode: str = "transit") -> dict:
-    """规划两地交通方案。返回高德 route dict；失败降级 {}。"""
+    """规划两地交通方案。origin/dest 必须传 "lng,lat" 坐标字符串；失败降级 {}。"""
     try:
         return await amap.plan_route(origin, dest, mode)
     except Exception:  # noqa: BLE001

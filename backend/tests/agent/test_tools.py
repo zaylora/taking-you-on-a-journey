@@ -11,6 +11,21 @@ def _schema_property(tool_obj, field_name: str) -> dict:
     return tool_obj.args_schema.model_json_schema()["properties"][field_name]
 
 
+def test_plan_route_schema_describes_coordinate_inputs():
+    origin = _schema_property(tools.plan_route, "origin")
+    dest = _schema_property(tools.plan_route, "dest")
+    mode = _schema_property(tools.plan_route, "mode")
+
+    for prop in (origin, dest):
+        description = prop.get("description", "")
+        assert "lng,lat" in description
+        assert "POI" in description
+        assert "不要" in description
+        assert "地名" in description
+
+    assert "transit" in mode.get("description", "")
+
+
 @pytest.mark.asyncio
 async def test_search_attractions_returns_pois(fake_amap):
     fake_amap["search_poi"] = [{"name": "故宫", "poi_id": "p1", "lng": 116.4, "lat": 39.9}]
