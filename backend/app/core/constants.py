@@ -16,7 +16,6 @@ EVENT_TITLE = "title"       # data: {"thread_id","title"} —— 会话标题更
 EVENT_INTENT = "intent"     # data: {"intent"} —— M5 意图调试/进度
 EVENT_PLAN_PATCH = "plan_patch"  # data: {"plan_version","changed_days"} —— 局部更新提示
 
-EVENT_THINKING = "thinking"        # data: {"text"} —— 推理模型思考过程增量（reasoning_content）
 EVENT_TOOL_CALL = "tool_call"      # data: {"tool","label"} —— 工具开始执行
 EVENT_TOOL_RESULT = "tool_result"  # data: {"tool","label"} —— 工具执行结束
 

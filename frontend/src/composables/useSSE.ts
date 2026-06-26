@@ -5,7 +5,7 @@ import { ElMessage } from 'element-plus'
 import type {
   EventName, NodeStartPayload, TokenPayload, NodeEndPayload,
   ErrorPayload, SessionPayload, ClarifyPayload, FinalPayload,
-  TitlePayload, PlanPatchPayload, ThinkingPayload, ToolCallPayload, ToolResultPayload,
+  TitlePayload, PlanPatchPayload, ToolCallPayload, ToolResultPayload,
 } from '../types'
 
 export function useSSE() {
@@ -46,9 +46,6 @@ export function useSSE() {
           }
           case 'node_end':
             tripStore.endNode((data as NodeEndPayload).node)
-            break
-          case 'thinking':
-            tripStore.appendThinking((data as ThinkingPayload).text)
             break
           case 'tool_call': {
             const p = data as ToolCallPayload

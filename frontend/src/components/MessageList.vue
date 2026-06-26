@@ -9,14 +9,26 @@
         {{ msg.role === 'user' ? 'U' : 'AI' }}
       </div>
       <div class="content" :class="{ 'clarify-bubble': msg.kind === 'clarify' }">
-        <div class="markdown-body" v-html="renderMarkdown(msg.content)"></div>
+        <AgentProgress
+          v-if="msg.role === 'assistant' && msg.toolSteps?.length"
+          :tool-steps="msg.toolSteps"
+        />
+        <div
+          v-if="msg.content"
+          class="markdown-body"
+          v-html="renderMarkdown(msg.content)"
+        ></div>
       </div>
     </div>
-    
-    <div v-if="hasProgress && loading" class="message assistant">
+
+    <!-- 瞬态阶段提示：展示后端 node_start 发来的阶段 label（如"正在思考..."），
+         仅 loading 期间、最后一条尚无工具链/正文时出现，不写入消息数组，
+         避免破坏实时与历史一致；工具链出现后由 pill 表达进度 -->
+    <div v-if="showThinking" class="message assistant">
       <div class="avatar">AI</div>
-      <div class="content progress-bubble">
-        <AgentProgress />
+      <div class="content thinking-bubble">
+        <span class="loading-icon"></span>
+        <span>{{ thinkingLabel }}</span>
       </div>
     </div>
   </div>
@@ -36,20 +48,34 @@ const props = defineProps<{
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
 
-const renderMarkdown = (text: string | undefined) => {
-  return md.render(text || '')
+const renderMarkdown = (text: unknown) => {
+  return md.render(typeof text === 'string' ? text : String(text ?? ''))
 }
 
 const tripStore = useTripStore()
-const hasProgress = computed(() =>
-  Object.keys(tripStore.agentProgress).length > 0 ||
-  tripStore.toolSteps.length > 0 ||
-  !!tripStore.thinkingText,
-)
+
+// loading 中且最后一条消息还没有任何可显示进度（工具链或正文）时，
+// 给出阶段提示。一旦工具链或正文出现即隐藏。
+const showThinking = computed(() => {
+  if (!props.loading) return false
+  const last = props.messages[props.messages.length - 1]
+  if (last && last.role === 'assistant' && (last.toolSteps?.length || last.content)) return false
+  return true
+})
+
+// 取当前正在 running 的 node 的后端 label，无则回退"正在思考…"
+const thinkingLabel = computed(() => {
+  const progress = tripStore.agentProgress
+  const labels = tripStore.nodeLabels
+  for (const node of Object.keys(progress)) {
+    if (progress[node] === 'running' && labels[node]) return labels[node]
+  }
+  return '正在思考…'
+})
 
 const listRef = ref<HTMLElement | null>(null)
 
-watch([() => props.messages, hasProgress, () => props.loading], () => {
+watch([() => props.messages, showThinking, () => props.loading], () => {
   nextTick(() => {
     if (listRef.value) {
       listRef.value.scrollTop = listRef.value.scrollHeight
@@ -103,7 +129,26 @@ watch([() => props.messages, hasProgress, () => props.loading], () => {
   background: #ecf5ff;
 }
 .content.clarify-bubble { background: #fdf6ec; border: 1px solid #f5dab1; color: #b88230; }
-.progress-bubble { background: transparent; padding: 0; }
+
+/* 瞬态思考气泡 */
+.thinking-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--el-text-color-regular, #606266);
+}
+.thinking-bubble .loading-icon {
+  width: 12px;
+  height: 12px;
+  border: 2px solid var(--el-color-primary, #409eff);
+  border-top-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
 
 /* Markdown Styles */
 :deep(.markdown-body p) {

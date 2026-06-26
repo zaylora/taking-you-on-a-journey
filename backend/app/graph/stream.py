@@ -13,13 +13,34 @@ logger = logging.getLogger(__name__)
 from app.core.constants import (
     EVENT_SESSION, EVENT_NODE_START, EVENT_TOKEN, EVENT_NODE_END,
     EVENT_CLARIFY, EVENT_FINAL, EVENT_ERROR, EVENT_PLAN_PATCH, EVENT_TITLE, NODES, NODE_LABELS,
-    EVENT_THINKING, EVENT_TOOL_CALL, EVENT_TOOL_RESULT, TOOL_LABELS,
+    EVENT_TOOL_CALL, EVENT_TOOL_RESULT, TOOL_LABELS,
 )
 from app.services.session_store import DEFAULT_TITLE, title_from_message
 
 
 def _sse(event: str, payload: dict) -> dict:
     return {"event": event, "data": json.dumps(payload, ensure_ascii=False)}
+
+
+def _as_text(content) -> str:
+    """归一化消息 content 为纯文本。
+
+    OpenAI 系返回 str；Anthropic 系返回结构化 list（如
+    [{"type": "text", "text": "…"}]），需抽取并拼接其中的文本块，
+    否则前端按字符串渲染会得到 [object Object]。
+    """
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for block in content:
+            if isinstance(block, dict):
+                if block.get("type", "text") == "text" and "text" in block:
+                    parts.append(block["text"])
+            elif isinstance(block, str):
+                parts.append(block)
+        return "".join(parts)
+    return str(content) if content else ""
 
 
 async def sse_events(message: str, thread_id: str | None, request):
@@ -54,13 +75,9 @@ async def sse_events(message: str, thread_id: str | None, request):
             kind, name = ev["event"], ev.get("name")
             if kind == "on_chat_model_stream":
                 chunk = ev["data"]["chunk"]
-                ak = getattr(chunk, "additional_kwargs", {}) or {}
-                # 豆包等推理模型：思考过程在 reasoning_content，答复正文在 content，时序先思考后答复
-                reasoning = ak.get("reasoning_content") or ak.get("reasoning")
-                if reasoning:
-                    yield _sse(EVENT_THINKING, {"text": reasoning})
-                if chunk.content:
-                    yield _sse(EVENT_TOKEN, {"text": chunk.content})
+                text = _as_text(chunk.content)
+                if text:
+                    yield _sse(EVENT_TOKEN, {"text": text})
             elif kind == "on_tool_start":
                 yield _sse(EVENT_TOOL_CALL, {"tool": name, "label": TOOL_LABELS.get(name, name)})
             elif kind == "on_tool_end":
@@ -83,7 +100,7 @@ async def sse_events(message: str, thread_id: str | None, request):
                 content = getattr(m, "content", None)
                 msg_type = getattr(m, "type", "")
                 if msg_type == "ai" and content:
-                    answer = content
+                    answer = _as_text(content)
                     break
             day_plans = values.get("day_plans", [])
             budget = values.get("budget_check", {})

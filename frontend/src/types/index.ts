@@ -1,7 +1,6 @@
 export interface NodeStartPayload { node: string; label?: string }
 export interface TokenPayload { text: string }
 export interface NodeEndPayload { node: string }
-export interface ThinkingPayload { text: string }
 export interface ToolCallPayload { tool: string; label: string }
 export interface ToolResultPayload { tool: string; label: string }
 export interface BudgetBreakdown { ticket: number; hotel: number; food: number; transport: number }
@@ -28,7 +27,12 @@ export interface SessionListItem {
 }
 
 export interface SessionSnapshot extends SessionListItem {
-  messages: Array<{ role: 'user' | 'assistant'; content: string; kind?: 'text' | 'clarify' | 'error' }>
+  messages: Array<{
+    role: 'user' | 'assistant'
+    content: string
+    kind?: 'text' | 'clarify' | 'error'
+    tool_steps?: Array<{ tool: string; label: string; status: 'done' }>
+  }>
   day_plans: DayPlan[]
   budget: Budget | Record<string, never>
   plan_version: number
@@ -69,4 +73,4 @@ export interface DayPlan {
 export type EventName =
   | 'session' | 'title' | 'plan_patch' | 'intent'
   | 'node_start' | 'token' | 'node_end' | 'clarify' | 'final' | 'error'
-  | 'thinking' | 'tool_call' | 'tool_result';
+  | 'tool_call' | 'tool_result';

@@ -1,6 +1,8 @@
 """M5 anonymous conversation session endpoints."""
 from fastapi import APIRouter, HTTPException, Request, Response
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
+
+from app.core.constants import TOOL_LABELS
 
 router = APIRouter()
 
@@ -9,20 +11,84 @@ def _config(thread_id: str) -> dict:
     return {"configurable": {"thread_id": thread_id}}
 
 
-def _message_to_dict(message) -> dict:
-    if isinstance(message, HumanMessage):
-        return {"role": "user", "content": message.content, "kind": "text"}
-    if isinstance(message, AIMessage):
-        return {"role": "assistant", "content": message.content, "kind": "text"}
-    if isinstance(message, BaseMessage):
-        return {"role": message.type, "content": message.content, "kind": "text"}
-    if isinstance(message, dict):
-        return {
-            "role": message.get("role", "assistant"),
-            "content": message.get("content", ""),
-            "kind": message.get("kind", "text"),
-        }
-    return {"role": "assistant", "content": str(message), "kind": "text"}
+def _extract_content(message) -> str:
+    """Extract text content from a message, handling list-type content."""
+    content = getattr(message, "content", None)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        # Multi-modal or tool-use messages: join text parts
+        parts = []
+        for part in content:
+            if isinstance(part, str):
+                parts.append(part)
+            elif isinstance(part, dict) and part.get("type") == "text":
+                parts.append(part.get("text", ""))
+        return "\n".join(parts)
+    if content is not None:
+        return str(content)
+    return ""
+
+
+_SKIP_TYPES = (ToolMessage, SystemMessage)
+
+
+def _tool_steps(message) -> list[dict]:
+    return [
+        {"tool": tc["name"], "label": TOOL_LABELS.get(tc["name"], tc["name"]), "status": "done"}
+        for tc in (getattr(message, "tool_calls", None) or [])
+    ]
+
+
+def _aggregate_messages(messages) -> list[dict]:
+    """把 ReAct 一轮内的多个 AIMessage 聚合成单条 assistant 消息。
+
+    单 Agent ReAct 一次回答会产生多个 AIMessage（每轮 model 决策一个，
+    中间轮往往只有 tool_calls、正文为空，最后一轮才有正文）。历史快照若逐条
+    渲染会得到多条空气泡，且与实时流「单条消息内聚合工具链」的形态不一致。
+    这里把相邻 AIMessage 折叠：工具步骤按顺序累积，正文拼接非空片段。
+    遇到 HumanMessage 即收尾当前 assistant 消息，开启新一轮。
+    """
+    result: list[dict] = []
+    current_ai: dict | None = None
+    for message in messages:
+        if isinstance(message, _SKIP_TYPES):
+            continue
+        if isinstance(message, HumanMessage):
+            current_ai = None
+            result.append({"role": "user", "content": _extract_content(message), "kind": "text"})
+        elif isinstance(message, AIMessage):
+            content = _extract_content(message)
+            if current_ai is None:
+                current_ai = {
+                    "role": "assistant",
+                    "content": content,
+                    "kind": "text",
+                    "tool_steps": _tool_steps(message),
+                }
+                result.append(current_ai)
+            else:
+                current_ai["tool_steps"].extend(_tool_steps(message))
+                if content:
+                    current_ai["content"] = (
+                        f"{current_ai['content']}{content}" if current_ai["content"] else content
+                    )
+        elif isinstance(message, BaseMessage):
+            current_ai = None
+            result.append({"role": message.type, "content": _extract_content(message), "kind": "text"})
+        elif isinstance(message, dict):
+            current_ai = None
+            raw = message.get("content", "")
+            content = raw if isinstance(raw, str) else _extract_content(raw)
+            result.append({
+                "role": message.get("role", "assistant"),
+                "content": content,
+                "kind": message.get("kind", "text"),
+            })
+        else:
+            current_ai = None
+            result.append({"role": "assistant", "content": str(message), "kind": "text"})
+    return result
 
 
 async def _snapshot(request: Request, meta: dict) -> dict:
@@ -31,7 +97,7 @@ async def _snapshot(request: Request, meta: dict) -> dict:
     values = snap.values or {}
     return {
         **meta,
-        "messages": [_message_to_dict(m) for m in values.get("messages", [])],
+        "messages": _aggregate_messages(values.get("messages", [])),
         "day_plans": values.get("day_plans", []) or [],
         "budget": values.get("budget_check", {}) or {},
         "plan_version": values.get("plan_version", 0) or 0,

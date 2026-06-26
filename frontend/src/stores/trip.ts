@@ -3,10 +3,17 @@ import { computed, ref } from 'vue'
 import { createSession, getSession, listSessions } from '../api/sessions'
 import type { ClarifyPayload, DayPlan, Budget, TripItem, SessionSnapshot } from '../types'
 
+export interface ToolStep {
+  tool: string
+  label: string
+  status: 'running' | 'done'
+}
+
 export interface Message {
   role: 'user' | 'assistant'
   content: string
   kind?: 'text' | 'clarify' | 'error'
+  toolSteps?: ToolStep[]
 }
 
 export interface Conversation {
@@ -53,8 +60,6 @@ export const useTripStore = defineStore('trip', () => {
   const nodeLabels = ref<Record<string, string>>({})
   // 工具调用过程链：按发生顺序记录每次工具调用及其状态（running→done）
   const toolSteps = ref<Array<{ tool: string; label: string; status: 'running' | 'done' }>>([])
-  // 推理模型思考过程（reasoning_content）增量累积；非推理模型则恒为空
-  const thinkingText = ref('')
   const clarifyPending = ref<ClarifyPayload | null>(null)
 
   const activeConversation = computed(() =>
@@ -80,7 +85,14 @@ export const useTripStore = defineStore('trip', () => {
     upsertConversation({
       threadId: snapshot.thread_id,
       title: snapshot.title,
-      messages: snapshot.messages || [],
+      messages: (snapshot.messages || [])
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({
+          role: m.role,
+          content: m.content,
+          kind: m.kind,
+          toolSteps: m.tool_steps?.map((s) => ({ ...s, status: 'done' as const })) || undefined,
+        })),
       dayPlans: snapshot.day_plans || [],
       budget: budgetFromSnapshot(snapshot),
       activeDay: snapshot.day_plans?.[0]?.day ?? null,
@@ -95,7 +107,6 @@ export const useTripStore = defineStore('trip', () => {
     agentProgress.value = {}
     nodeLabels.value = {}
     toolSteps.value = []
-    thinkingText.value = ''
   }
 
   const setActiveThread = (id: string | null) => {
@@ -139,14 +150,8 @@ export const useTripStore = defineStore('trip', () => {
   }
 
   const appendToLastMessage = (text: string) => {
-    const current = activeConversation.value
-    if (!current) return
-    const last = current.messages[current.messages.length - 1]
-    if (!last || last.role !== 'assistant' || last.kind === 'clarify') {
-      addMessage('assistant', text)
-    } else {
-      last.content += text
-    }
+    const msg = ensureAssistantMessage()
+    if (msg) msg.content += text
   }
 
   const startNode = (node: string, label?: string) => {
@@ -155,21 +160,41 @@ export const useTripStore = defineStore('trip', () => {
   }
   const endNode = (node: string) => { agentProgress.value[node] = 'done' }
 
-  // 工具开始：把上一个仍在 running 的步骤收尾（ReAct 串行执行），再追加新步骤
+  // 取得当前可追加的 assistant 占位消息：最后一条是 assistant 且非澄清气泡则复用，
+  // 否则新建一条空 assistant 消息。保证实时流的工具链/正文始终挂在同一条消息上，
+  // 与历史快照「单条消息内聚合」的形态一致。
+  const ensureAssistantMessage = (): Message | null => {
+    const current = activeConversation.value
+    if (!current) return null
+    const last = current.messages[current.messages.length - 1]
+    if (last && last.role === 'assistant' && last.kind !== 'clarify') return last
+    const msg: Message = { role: 'assistant', content: '', kind: 'text' }
+    current.messages.push(msg)
+    return msg
+  }
+
+  // 工具开始：把上一个仍在 running 的步骤收尾（ReAct 串行执行），再追加新步骤到 assistant 消息
   const startToolCall = (tool: string, label: string) => {
-    for (const s of toolSteps.value) if (s.status === 'running') s.status = 'done'
-    toolSteps.value.push({ tool, label, status: 'running' })
+    const msg = ensureAssistantMessage()
+    if (!msg) return
+    if (!msg.toolSteps) msg.toolSteps = []
+    for (const s of msg.toolSteps) if (s.status === 'running') s.status = 'done'
+    msg.toolSteps.push({ tool, label, status: 'running' })
   }
   // 工具结束：把最近一个同名 running 步骤标记 done
   const endToolCall = (tool: string) => {
-    for (let i = toolSteps.value.length - 1; i >= 0; i--) {
-      if (toolSteps.value[i].tool === tool && toolSteps.value[i].status === 'running') {
-        toolSteps.value[i].status = 'done'
-        break
+    const current = activeConversation.value
+    if (!current) return
+    const last = current.messages[current.messages.length - 1]
+    if (last && last.role === 'assistant' && last.toolSteps) {
+      for (let i = last.toolSteps.length - 1; i >= 0; i--) {
+        if (last.toolSteps[i].tool === tool && last.toolSteps[i].status === 'running') {
+          last.toolSteps[i].status = 'done'
+          break
+        }
       }
     }
   }
-  const appendThinking = (text: string) => { thinkingText.value += text }
 
   const setThreadId = (id: string) => {
     if (!conversations.value.some((c) => c.threadId === id)) {
@@ -241,11 +266,11 @@ export const useTripStore = defineStore('trip', () => {
   return {
     conversations, activeThreadId, activeConversation,
     messages, agentProgress, nodeLabels, threadId, dayPlans, clarifyPending,
-    toolSteps, thinkingText,
+    toolSteps,
     activeDay, activePoiId, activeTransport, budget,
     loadConversations, loadConversation, createConversation, ensureConversation,
     addMessage, appendToLastMessage, startNode, endNode, clearProgress,
-    startToolCall, endToolCall, appendThinking,
+    startToolCall, endToolCall,
     setThreadId, setTitle, setClarify, clearClarify, setDayPlans, setActiveDay,
     setActivePoi, setActiveTransport, setBudget, setPlanVersion, touchActive,
   }
