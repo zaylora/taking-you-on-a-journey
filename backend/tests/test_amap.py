@@ -40,6 +40,24 @@ async def test_search_poi_degrades_on_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_poi_logs_empty_diagnostics(monkeypatch, caplog):
+    _patch_client(
+        monkeypatch,
+        payload={"status": "1", "infocode": "10000", "info": "OK", "count": "0", "pois": []},
+    )
+    caplog.set_level("INFO", logger="app.tools.amap")
+
+    assert await amap.search_poi("成都", "不存在的景点", "风景名胜") == []
+
+    assert "amap search_poi empty" in caplog.text
+    assert "成都" in caplog.text
+    assert "不存在的景点" in caplog.text
+    secret = amap.get_settings().amap_web_key.get_secret_value()
+    if secret:
+        assert secret not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_get_weather_degrades_to_climate(monkeypatch):
     _patch_client(monkeypatch, exc=httpx.TimeoutException("t"))
     w = await amap.get_weather("成都")

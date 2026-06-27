@@ -1,4 +1,4 @@
-from app.agent.planning import DayPlans, PlanItem, ITINERARY_SYS
+from app.agent.domain.planning import DayPlans, PlanItem, ITINERARY_SYS
 
 
 def test_dayplans_schema_parses():

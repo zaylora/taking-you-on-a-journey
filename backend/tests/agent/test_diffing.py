@@ -1,4 +1,4 @@
-from app.agent.diffing import diff_changed_days
+from app.agent.domain.diffing import diff_changed_days
 
 
 def _day(day, items, hotel=None):

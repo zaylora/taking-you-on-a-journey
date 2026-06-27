@@ -1,6 +1,8 @@
 """高德 Web 服务代理：统一 httpx.AsyncClient + 5s 超时 + 失败降级（不抛）。
 Key 取自 config.amap_web_key，绝不下发前端、绝不进日志/SSE。
 """
+import logging
+
 import httpx
 from langsmith import traceable
 
@@ -8,6 +10,7 @@ from app.core.config import get_settings
 
 _BASE = "https://restapi.amap.com/v3"
 _TIMEOUT = 5.0
+logger = logging.getLogger(__name__)
 
 
 def _key() -> str:
@@ -22,12 +25,19 @@ async def geocode(city: str) -> dict:
             r = await client.get(f"{_BASE}/geocode/geo", params={"key": _key(), "address": city})
             r.raise_for_status()
             data = r.json()
+        if data.get("status") not in (None, "1", 1):
+            logger.warning(
+                "amap geocode failed city=%s infocode=%s info=%s",
+                city, data.get("infocode"), data.get("info"),
+            )
         loc = (data.get("geocodes") or [{}])[0].get("location")
         if not loc:
+            logger.info("amap geocode empty city=%s", city)
             return {}
         lng, lat = loc.split(",")
         return {"lng": float(lng), "lat": float(lat)}
-    except Exception:  # noqa: BLE001 —— 降级
+    except Exception as exc:  # noqa: BLE001 —— 降级
+        logger.warning("amap geocode exception city=%s error=%s", city, type(exc).__name__)
         return {}
 
 
@@ -42,6 +52,11 @@ async def search_poi(city: str, keywords: str, poi_type: str = "", page_size: in
             })
             r.raise_for_status()
             data = r.json()
+        if data.get("status") not in (None, "1", 1):
+            logger.warning(
+                "amap search_poi failed city=%s keywords=%s type=%s infocode=%s info=%s",
+                city, keywords, poi_type, data.get("infocode"), data.get("info"),
+            )
         out = []
         for p in data.get("pois", []) or []:
             loc = (p.get("location") or "").split(",")
@@ -52,8 +67,17 @@ async def search_poi(city: str, keywords: str, poi_type: str = "", page_size: in
                 "lng": float(loc[0]), "lat": float(loc[1]),
                 "address": p.get("address", ""), "type": p.get("type", ""),
             })
+        if not out:
+            logger.info(
+                "amap search_poi empty city=%s keywords=%s type=%s count=%s infocode=%s info=%s",
+                city, keywords, poi_type, data.get("count"), data.get("infocode"), data.get("info"),
+            )
         return out
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        logger.warning(
+            "amap search_poi exception city=%s keywords=%s type=%s error=%s",
+            city, keywords, poi_type, type(exc).__name__,
+        )
         return []
 
 
@@ -67,6 +91,11 @@ async def get_weather(city: str) -> dict:
             })
             r.raise_for_status()
             data = r.json()
+        if data.get("status") not in (None, "1", 1):
+            logger.warning(
+                "amap weather failed city=%s infocode=%s info=%s",
+                city, data.get("infocode"), data.get("info"),
+            )
         casts = data.get("forecasts", [{}])[0].get("casts") or []
         if not casts:
             raise ValueError("no forecast")
@@ -78,7 +107,8 @@ async def get_weather(city: str) -> dict:
             "is_rainy": "雨" in text,
             "source": "forecast",
         }
-    except Exception:  # noqa: BLE001 —— 降级季节气候
+    except Exception as exc:  # noqa: BLE001 —— 降级季节气候
+        logger.warning("amap weather degraded city=%s error=%s", city, type(exc).__name__)
         return {"text": "以当季气候为准", "temp": "", "is_rainy": False, "source": "climate"}
 
 
@@ -91,8 +121,18 @@ async def plan_route(origin: str, dest: str, mode: str = "transit") -> dict:
                 "key": _key(), "origin": origin, "destination": dest,
             })
             r.raise_for_status()
-            return r.json().get("route", {}) or {}
-    except Exception:  # noqa: BLE001
+            data = r.json()
+        if data.get("status") not in (None, "1", 1):
+            logger.warning(
+                "amap plan_route failed mode=%s infocode=%s info=%s",
+                mode, data.get("infocode"), data.get("info"),
+            )
+        route = data.get("route", {}) or {}
+        if not route:
+            logger.info("amap plan_route empty mode=%s", mode)
+        return route
+    except Exception as exc:  # noqa: BLE001
+        logger.warning("amap plan_route exception mode=%s error=%s", mode, type(exc).__name__)
         return {}
 
 
@@ -110,6 +150,11 @@ async def distance_batch(origins: list[str], destination: str, type_: str = "1")
             })
             r.raise_for_status()
             data = r.json()
+        if data.get("status") not in (None, "1", 1):
+            logger.warning(
+                "amap distance failed origins=%s type=%s infocode=%s info=%s",
+                len(origins), type_, data.get("infocode"), data.get("info"),
+            )
         out = []
         for it in data.get("results", []) or []:
             out.append({
@@ -118,6 +163,12 @@ async def distance_batch(origins: list[str], destination: str, type_: str = "1")
                 "distance": float(it.get("distance", 0) or 0),
                 "duration": float(it.get("duration", 0) or 0),
             })
+        if not out:
+            logger.info("amap distance empty origins=%s type=%s", len(origins), type_)
         return out
-    except Exception:  # noqa: BLE001 —— 降级
+    except Exception as exc:  # noqa: BLE001 —— 降级
+        logger.warning(
+            "amap distance exception origins=%s type=%s error=%s",
+            len(origins), type_, type(exc).__name__,
+        )
         return []
