@@ -33,6 +33,10 @@ def _extract_content(message) -> str:
 _SKIP_TYPES = (ToolMessage, SystemMessage)
 
 
+def _is_summarization_message(message) -> bool:
+    return getattr(message, "additional_kwargs", {}).get("lc_source") == "summarization"
+
+
 def _tool_steps(message) -> list[dict]:
     return [
         {"tool": tc["name"], "label": TOOL_LABELS.get(tc["name"], tc["name"]), "status": "done"}
@@ -55,6 +59,8 @@ def _aggregate_messages(messages) -> list[dict]:
         if isinstance(message, _SKIP_TYPES):
             continue
         if isinstance(message, HumanMessage):
+            if _is_summarization_message(message):
+                continue
             current_ai = None
             result.append({"role": "user", "content": _extract_content(message), "kind": "text"})
         elif isinstance(message, AIMessage):

@@ -69,3 +69,19 @@ def test_system_and_tool_messages_skipped():
 
     assert [m["role"] for m in result] == ["user", "assistant"]
     assert result[1]["content"] == "你好呀"
+
+
+def test_summarization_human_message_skipped():
+    messages = [
+        HumanMessage(
+            content="Here is a summary of the conversation to date:\n\n用户想去广州。",
+            additional_kwargs={"lc_source": "summarization"},
+        ),
+        HumanMessage(content="有没有推荐吃的店铺呢？广州和顺德"),
+        AIMessage(content="有的。"),
+    ]
+
+    result = _aggregate_messages(messages)
+
+    assert [m["role"] for m in result] == ["user", "assistant"]
+    assert result[0]["content"] == "有没有推荐吃的店铺呢？广州和顺德"
