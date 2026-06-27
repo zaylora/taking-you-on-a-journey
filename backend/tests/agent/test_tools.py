@@ -6,8 +6,8 @@ import pytest
 
 from app.agent import tools
 from app.agent.time_context import current_time_payload
-from app.agent.domain.planning import DayPlans
-from app.agent.domain.lodging import _AccoResult
+from app.agent.itinerary.schemas import DayPlans
+from app.agent.itinerary.lodging import _AccoResult
 from tests.conftest import make_fake_build_llm
 
 

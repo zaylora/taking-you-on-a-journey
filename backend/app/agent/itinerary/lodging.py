@@ -2,7 +2,7 @@
 """住宿纯函数与 schema（迁自 accommodation 节点）。过夜日=除最后一天。"""
 from pydantic import BaseModel, Field
 
-from app.agent.domain.planning import Hotel
+from app.agent.itinerary.schemas import Hotel
 
 _LEVEL_KEYWORD = {"经济": "经济型酒店", "舒适": "舒适型酒店", "高端": "高档酒店"}
 

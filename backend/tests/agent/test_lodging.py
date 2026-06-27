@@ -1,4 +1,4 @@
-from app.agent.domain.lodging import overnight_days, attach_hotels, hotel_keyword
+from app.agent.itinerary.lodging import overnight_days, attach_hotels, hotel_keyword
 
 
 def test_overnight_days_excludes_last():

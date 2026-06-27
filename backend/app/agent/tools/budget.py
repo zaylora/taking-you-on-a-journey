@@ -8,8 +8,8 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 
-from app.agent.domain.budgeting import compute_budget
-from app.agent.domain.diffing import diff_changed_days
+from app.agent.itinerary.budgeting import compute_budget
+from app.agent.itinerary.diffing import diff_changed_days
 
 
 @tool

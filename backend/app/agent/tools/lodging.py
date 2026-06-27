@@ -6,7 +6,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
-from app.agent.domain.lodging import (
+from app.agent.itinerary.lodging import (
     ACCO_SYS, _AccoResult, attach_hotels, hotel_keyword, overnight_days,
 )
 from app.llm.factory import build_llm

@@ -7,11 +7,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
-from app.agent.domain.planning import DayPlans, ITINERARY_SYS
-from app.agent.planner.assembler import routes_to_day_plans
-from app.agent.planner.matrix import duration_matrix
-from app.agent.planner.optimizer import solve_vrptw
-from app.agent.planner.prefilter import select_candidates
+from app.agent.itinerary.schemas import DayPlans, ITINERARY_SYS
+from app.agent.itinerary.routing.assembler import routes_to_day_plans
+from app.agent.itinerary.routing.matrix import duration_matrix
+from app.agent.itinerary.routing.optimizer import solve_vrptw
+from app.agent.itinerary.routing.prefilter import select_candidates
 from app.core.config import get_settings
 from app.llm.factory import build_llm
 

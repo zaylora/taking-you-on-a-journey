@@ -1,6 +1,6 @@
 import pytest
 
-from app.agent.planner import matrix
+from app.agent.itinerary.routing import matrix
 
 
 def test_haversine_seconds_zero_for_same_point():

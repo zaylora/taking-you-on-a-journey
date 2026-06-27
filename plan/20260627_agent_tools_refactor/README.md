@@ -24,8 +24,8 @@
 - `backend/app/agent/tools/budget.py`
 - `backend/app/agent/tools/time.py`
 - `backend/app/agent/tools/utils.py`
-- `backend/app/agent/planner/*`
-- `backend/app/agent/domain/*`
+- `backend/app/agent/itinerary/*`
+- `backend/app/agent/itinerary/routing/*`
 
 ### 测试
 
@@ -36,7 +36,7 @@
 - `backend/tests/agent/test_lodging.py`
 - `backend/tests/agent/test_matrix.py`
 - `backend/tests/agent/test_optimizer.py`
-- `backend/tests/agent/test_planning.py`
+- `backend/tests/agent/test_itinerary_schemas.py`
 
 ## 改动详情
 
@@ -78,31 +78,31 @@ agent/tools/
 
 `app.agent.tools` 仍然导出原工具名，`build.py` 的工具注册方式不需要变化。
 
-### 4. 规划算法收进 planner
+### 4. 行程业务逻辑收进 itinerary
 
-确定性行程规划流水线移动到 `agent/planner/`：
+行程相关的 schema、住宿、预算、diff 纯函数统一放到 `agent/itinerary/`。这个包表达的是业务对象和确定性业务计算，不是 LangChain tool，也不是 Agent 自身的“计划器”。
 
 ```text
-agent/planner/
+agent/itinerary/
+  schemas.py
+  lodging.py
+  budgeting.py
+  diffing.py
+```
+
+### 5. 路线算法收进 itinerary/routing
+
+确定性路线编排流水线移动到 `agent/itinerary/routing/`：
+
+```text
+agent/itinerary/routing/
   assembler.py
   matrix.py
   optimizer.py
   prefilter.py
 ```
 
-这些模块负责候选筛选、距离矩阵、OR-Tools 求解和 day plan 骨架装配。
-
-### 5. 领域模型和纯函数收进 domain
-
-结构化输出 schema 与纯领域函数移动到 `agent/domain/`：
-
-```text
-agent/domain/
-  planning.py
-  lodging.py
-  budgeting.py
-  diffing.py
-```
+这些模块只负责候选筛选、距离矩阵、OR-Tools 求解和 day plan 骨架装配。
 
 这样 `agent/` 根目录只保留 Agent 装配、提示词、状态和时间上下文。
 
@@ -124,17 +124,17 @@ backend/app/agent/
     time.py
     utils.py
 
-  planner/
-    assembler.py
-    matrix.py
-    optimizer.py
-    prefilter.py
-
-  domain/
-    planning.py
+  itinerary/
+    schemas.py
     lodging.py
     budgeting.py
     diffing.py
+
+    routing/
+      assembler.py
+      matrix.py
+      optimizer.py
+      prefilter.py
 ```
 
 `backend/app/tools/` 现在只保留外部服务封装：

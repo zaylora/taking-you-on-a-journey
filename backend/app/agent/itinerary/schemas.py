@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""行程规划结构化 schema（OR-Tools 装配后由 soft_fill LLM 填充软字段）。"""
+"""行程结构化 schema（OR-Tools 装配后由 soft_fill LLM 填充软字段）。"""
 from pydantic import BaseModel, Field
 
 
