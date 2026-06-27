@@ -1,7 +1,7 @@
 import httpx
 import pytest
 
-import app.tools.amap as amap
+import app.utils.amap as amap
 
 
 class _FakeResp:

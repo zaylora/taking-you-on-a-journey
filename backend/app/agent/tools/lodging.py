@@ -10,7 +10,7 @@ from app.agent.itinerary.lodging import (
     ACCO_SYS, _AccoResult, attach_hotels, hotel_keyword, overnight_days,
 )
 from app.llm.factory import build_llm
-from app.tools import amap
+from app.utils import amap
 
 from .utils import parse_jsonish_string
 
