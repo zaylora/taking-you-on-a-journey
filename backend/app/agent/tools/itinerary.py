@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Itinerary assembly Agent tool."""
 import asyncio
+import json
 import os
 from typing import Any
 
@@ -89,7 +90,7 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
                              weather: dict, start_date: str = "", num_people: int = 1,
                              budget_advice: dict | None = None) -> dict:
     """把景点编排成逐日行程。内部用 OR-Tools VRPTW 求最优分天+顺路（高德真实街道时间），
-    再由 LLM 填软字段（时间段/人均cost/说明）。返回 {day_plans, daily_centers}。
+    再确定性填充时间、餐饮、交通、费用，并由 LLM 安全润色 note。返回 {day_plans, daily_centers}。
     budget_advice 非空时压低花费。候选为空时返回空行程。"""
     candidates = select_candidates(attractions or [], days)
     if not candidates:
@@ -126,20 +127,16 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
     )
 
     payload = {
-        "skeleton": skeleton,
-        "restaurants": _compact_restaurants(restaurants or []),
+        "day_plans": deterministic_day_plans,
         "weather": weather or {},
-        "start_date": start_date,
-        "num_people": max(1, num_people),
+        "instruction": "只润色 note 字段，不要改 POI、坐标、顺序、时间或费用。",
     }
-    if budget_advice:
-        payload["budget_advice"] = budget_advice
     llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
     try:
         result = await asyncio.wait_for(
             llm.ainvoke([
                 SystemMessage(content=ITINERARY_SYS),
-                HumanMessage(content=str(payload)),
+                HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
             ]),
             timeout=_SOFT_FILL_TIMEOUT_SECONDS,
         )

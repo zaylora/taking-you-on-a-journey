@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import ast
+import json
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -344,7 +344,7 @@ async def test_assemble_itinerary_runs_ortools_pipeline(fake_amap, monkeypatch, 
 
 
 @pytest.mark.asyncio
-async def test_assemble_itinerary_success_uses_skeleton_soft_fill_payload(fake_amap, monkeypatch, tmp_path):
+async def test_assemble_itinerary_success_uses_note_enrichment_payload(fake_amap, monkeypatch, tmp_path):
     calls = []
     fake = DayPlans(days=[{"day": 1, "items": [
         {"type": "attraction", "name": "祖庙", "poi_id": "p1", "cost": 20}]}])
@@ -371,23 +371,18 @@ async def test_assemble_itinerary_success_uses_skeleton_soft_fill_payload(fake_a
     })
     get_settings.cache_clear()
 
-    payload = ast.literal_eval(calls[0][1].content)
-    assert set(payload) == {
-        "skeleton", "restaurants", "weather", "start_date", "num_people", "budget_advice",
-    }
-    assert "day_plans" not in payload
-    assert payload["restaurants"] == [{
-        "name": "民信老铺",
-        "poi_id": "r1",
-        "lng": 113.114509,
-        "lat": 23.031653,
-        "address": "",
-        "type": "",
-    }]
+    payload = json.loads(calls[0][1].content)
+    assert set(payload) == {"day_plans", "weather", "instruction"}
+    assert "skeleton" not in payload
+    assert "restaurants" not in payload
+    assert "budget_advice" not in payload
+    assert "只润色 note 字段" in payload["instruction"]
+    assert payload["day_plans"][0]["weather"] == {"text": "晴", "temp": "", "is_rainy": False}
+    assert any(
+        item["type"] == "meal" and item["name"] == "民信老铺"
+        for item in payload["day_plans"][0]["items"]
+    )
     assert payload["weather"] == {"text": "晴"}
-    assert payload["start_date"] == "2026-07-01"
-    assert payload["num_people"] == 2
-    assert payload["budget_advice"] == {"over_amount": 100.0}
 
 
 @pytest.mark.asyncio

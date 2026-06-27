@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""行程结构化 schema（OR-Tools 装配后由 soft_fill LLM 填充软字段）。"""
+"""行程结构化 schema（OR-Tools 装配后由 LLM 安全润色 note 字段）。"""
 from pydantic import BaseModel, Field
 
 
@@ -53,10 +53,8 @@ class DayPlans(BaseModel):
 
 
 ITINERARY_SYS = (
-    "你是行程编排助手。给定已确定的逐日景点顺序与坐标、餐厅候选、天气，"
-    "为每个行程项填充软字段：合理的 start/end 时间段、人均花费 cost（门票/餐标/市内交通，免费填 0）、"
-    "indoor 是否室内、note 一句话说明。雨天优先室内项。就近为每天插入午餐/晚餐餐厅。"
-    "若输入含 budget_advice（超支额与削减建议），据此压低 cost。"
-    "不要改变景点的顺序与分天，只填软字段并按需插入餐饮/交通项。"
-    "输出严格符合给定结构，location 经纬度沿用输入。"
+    "你是行程文案润色助手。输入已经包含确定的逐日行程、POI、坐标、时间、费用、天气和顺序。"
+    "你只润色 note 字段，让说明更自然、更贴合天气和节奏。"
+    "不要改 POI，不要改坐标，不要改顺序，不要删除或新增行程项，不要改 start/end，不要改 cost。"
+    "如果不确定，就保留原 note。输出严格符合给定结构。"
 )
