@@ -12,6 +12,7 @@ from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
 from app.llm.factory import build_llm
+from app.agent.prompt import XHS_RESEARCH_SYS
 
 _DEFAULT_TIMEOUT_SECONDS = 45
 _SECRETISH_RE = re.compile(r"(?i)(a1|web_session|webId|xsecappid|cookie)[=:]\s*[^,\s;]+")
@@ -239,13 +240,7 @@ class XhsTravelBrief(BaseModel):
     source_notes: list[dict[str, Any]] = Field(default_factory=list, description="简短来源索引，不含长原文。")
 
 
-_XHS_RESEARCH_SYS = (
-    "你是旅行攻略研究助手。根据小红书搜索结果、笔记详情和可选评论，"
-    "提炼可用于后续地图校验和行程编排的结构化 brief。"
-    "重点抽取：推荐地点、几点适合去哪、顺路路线、餐饮关键词、注意事项、避雷。"
-    "不要照抄长段原文；只做事实性归纳。若信息来自单一来源或不确定，要在 reason/tips 中体现谨慎。"
-    "输出中的地点名应尽量短，适合继续用地图检索。"
-)
+_XHS_RESEARCH_SYS = XHS_RESEARCH_SYS
 
 
 @tool

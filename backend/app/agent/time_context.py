@@ -8,7 +8,7 @@ from langchain.agents.middleware import AgentMiddleware, ModelRequest
 from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
-from app.agent.prompt import TRIP_AGENT_SYS
+from app.agent.prompt import CURRENT_TIME_CONTEXT_TEMPLATE, TRIP_AGENT_SYS
 from app.core.config import get_settings
 
 
@@ -43,16 +43,7 @@ def current_time_payload(timezone_name: str | None = None, now: datetime | None 
 def build_system_prompt(timezone_name: str | None = None, now: datetime | None = None) -> str:
     """每次模型调用前生成带当前时间快照的系统提示。"""
     payload = current_time_payload(timezone_name=timezone_name, now=now)
-    time_context = (
-        "\n\n当前时间上下文：\n"
-        f"- 当前日期: {payload['date']}\n"
-        f"- 当前时间: {payload['time']}\n"
-        f"- 星期: {payload['weekday']}\n"
-        f"- 时区: {payload['timezone']} (UTC{payload['utc_offset']})\n"
-        f"- Unix 毫秒: {payload['unix_ms']}\n"
-        "如果用户问题依赖准确的当前时间、日期、时区或相对时间表达，"
-        "先调用已注册的当前时间工具；不要凭历史消息或模型记忆推断。"
-    )
+    time_context = CURRENT_TIME_CONTEXT_TEMPLATE.format(**payload)
     return f"{TRIP_AGENT_SYS}{time_context}"
 
 

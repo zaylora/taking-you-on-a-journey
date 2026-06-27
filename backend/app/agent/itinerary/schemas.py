@@ -2,6 +2,8 @@
 """行程结构化 schema（OR-Tools 装配后由 LLM 安全润色 note 字段）。"""
 from pydantic import BaseModel, Field
 
+from app.agent.prompt import ITINERARY_SYS
+
 
 class Location(BaseModel):
     lng: float = Field(default=0.0, description="经度，沿用输入坐标，不要自行编造")
@@ -51,10 +53,3 @@ class DayPlan(BaseModel):
 class DayPlans(BaseModel):
     days: list[DayPlan] = Field(default_factory=list, description="逐天行程")
 
-
-ITINERARY_SYS = (
-    "你是行程文案润色助手。输入已经包含确定的逐日行程、POI、坐标、时间、费用、天气和顺序。"
-    "你只润色 note 字段，让说明更自然、更贴合天气和节奏。"
-    "不要改 POI，不要改坐标，不要改顺序，不要删除或新增行程项，不要改 start/end，不要改 cost。"
-    "如果不确定，就保留原 note。输出严格符合给定结构。"
-)

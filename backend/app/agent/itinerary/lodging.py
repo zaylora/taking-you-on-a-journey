@@ -2,17 +2,12 @@
 """住宿纯函数与 schema（迁自 accommodation 节点）。过夜日=除最后一天。"""
 from pydantic import BaseModel, Field
 
+from app.agent.prompt import ACCOMMODATION_SYS
 from app.agent.itinerary.schemas import Hotel
 
 _LEVEL_KEYWORD = {"经济": "经济型酒店", "舒适": "舒适型酒店", "高端": "高档酒店"}
 
-ACCO_SYS = (
-    "你是住宿规划助手。给定每个过夜日的活动中心坐标、住宿档位与酒店候选池，"
-    "为每个过夜日就近选一家酒店，并按档位估每晚整间价 price（元）："
-    "经济约 200~400、舒适约 400~800、高端约 800 以上。"
-    "优先使用候选池中的真实酒店（带 poi_id 与坐标）；候选池为空时按档位与中心坐标给出参考酒店（poi_id 留空）。"
-    "只为给定的过夜日分配，输出严格符合结构。"
-)
+ACCO_SYS = ACCOMMODATION_SYS
 
 
 class _HotelForDay(BaseModel):
