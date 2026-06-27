@@ -34,6 +34,11 @@ class _InvalidStructuredLLM:
         return _InvalidStructuredRunnable()
 
 
+class _RaisingBuildLLM:
+    def __call__(self, *_args, **_kwargs):
+        raise RuntimeError("llm construction failed")
+
+
 class _CapturingStructuredRunnable:
     def __init__(self, result, calls):
         self._result = result
@@ -429,7 +434,7 @@ async def test_assemble_itinerary_success_only_merges_matching_llm_notes(fake_am
     zumiao = next(item for item in attractions if item["poi_id"] == "p1")
     assert zumiao["location"] == {"lng": 113.11351, "lat": 23.028945}
     assert zumiao["cost"] == 0.0
-    assert zumiao["note"] == "适合雨天慢逛。"
+    assert zumiao["note"] == "雨天适当放慢节奏。"
     assert all(item["poi_id"] != "fake" for item in items)
 
 
@@ -470,6 +475,34 @@ async def test_assemble_itinerary_degrades_to_skeleton_when_soft_fill_fails(fake
     assert out["day_plans"][0]["weather"]["text"] == "雷阵雨"
     assert out["day_plans"][0]["center"] == out["daily_centers"][0]
     assert all(item["start"] and item["end"] for item in out["day_plans"][0]["items"])
+    assert out["warnings"] == ["itinerary_note_enrichment_failed"]
+
+
+@pytest.mark.asyncio
+async def test_assemble_itinerary_degrades_to_skeleton_when_llm_construction_fails(fake_amap, monkeypatch, tmp_path):
+    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", _RaisingBuildLLM())
+    monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    out = await tools.assemble_itinerary.ainvoke({
+        "city": "佛山",
+        "days": 1,
+        "attractions": [
+            {"name": "祖庙", "poi_id": "p1", "lng": 113.11351, "lat": 23.028945, "rating": 5.0},
+            {"name": "岭南天地", "poi_id": "p2", "lng": 113.11519, "lat": 23.028895, "rating": 4.8},
+        ],
+        "restaurants": [
+            {"name": "民信老铺", "poi_id": "r1", "lng": 113.114509, "lat": 23.031653},
+        ],
+        "weather": {"text": "雷阵雨", "temp": "26~32℃", "is_rainy": True},
+    })
+    get_settings.cache_clear()
+
+    assert out["daily_centers"]
+    assert out["day_plans"][0]["center"] == out["daily_centers"][0]
+    assert out["day_plans"][0]["weather"]["text"] == "雷阵雨"
+    assert {item["name"] for item in out["day_plans"][0]["items"]} >= {"祖庙", "岭南天地", "民信老铺"}
     assert out["warnings"] == ["itinerary_note_enrichment_failed"]
 
 

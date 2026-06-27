@@ -95,8 +95,8 @@ def test_merge_safe_notes_only_updates_matching_notes():
     enriched = [{
         "day": 1,
         "items": [
-            {"type": "attraction", "name": "祖庙", "poi_id": "p1", "location": {"lng": 999, "lat": 999}, "note": "适合雨天慢逛。"},
-            {"type": "meal", "name": "不存在餐厅", "poi_id": "fake", "location": {"lng": 0, "lat": 0}, "note": "must ignore"},
+            {"type": "attraction", "name": "祖庙", "poi_id": "p1", "location": {"lng": 1, "lat": 2}, "note": "适合雨天慢逛。"},
+            {"type": "meal", "name": "民信老铺", "poi_id": "r1", "location": {"lng": 3, "lat": 4}, "note": "meal new"},
         ],
     }]
 
@@ -104,5 +104,141 @@ def test_merge_safe_notes_only_updates_matching_notes():
 
     assert out[0]["items"][0]["note"] == "适合雨天慢逛。"
     assert out[0]["items"][0]["location"] == {"lng": 1, "lat": 2}
-    assert out[0]["items"][1]["note"] == "meal old"
+    assert out[0]["items"][1]["note"] == "meal new"
     assert len(out[0]["items"]) == 2
+
+
+def test_merge_safe_notes_returns_base_unchanged_when_structure_mismatches():
+    base = [{
+        "day": 1,
+        "date": "2026-07-01",
+        "weather": {"text": "晴", "temp": "", "is_rainy": False},
+        "items": [
+            {
+                "type": "attraction",
+                "name": "祖庙",
+                "poi_id": "p1",
+                "location": {"lng": 113.11351, "lat": 23.028945},
+                "start": "09:30",
+                "end": "11:00",
+                "cost": 20.0,
+                "note": "old",
+            },
+            {
+                "type": "meal",
+                "name": "民信老铺",
+                "poi_id": "r1",
+                "location": {"lng": 113.114509, "lat": 23.031653},
+                "start": "12:00",
+                "end": "13:00",
+                "cost": 80.0,
+                "note": "meal old",
+            },
+        ],
+    }]
+    enriched = [{
+        **base[0],
+        "items": [
+            {**base[0]["items"][1], "note": "wrong order meal note"},
+            {**base[0]["items"][0], "note": "wrong order attraction note"},
+        ],
+    }]
+
+    out = merge_safe_notes(base, enriched)
+
+    assert out == base
+
+
+def test_merge_safe_notes_uses_item_index_for_duplicate_transport_notes():
+    base = [{
+        "day": 1,
+        "items": [
+            {
+                "type": "transport",
+                "name": "",
+                "poi_id": "",
+                "location": {"lng": 0.0, "lat": 0.0},
+                "start": "11:00",
+                "end": "11:25",
+                "cost": 15.0,
+                "weather": "",
+                "note": "transport one",
+            },
+            {
+                "type": "transport",
+                "name": "",
+                "poi_id": "",
+                "location": {"lng": 0.0, "lat": 0.0},
+                "start": "14:00",
+                "end": "14:25",
+                "cost": 15.0,
+                "weather": "",
+                "note": "transport two",
+            },
+        ],
+    }]
+    enriched = [{
+        "day": 1,
+        "items": [
+            {**base[0]["items"][0], "note": "first ride"},
+            {**base[0]["items"][1], "note": "second ride"},
+        ],
+    }]
+
+    out = merge_safe_notes(base, enriched)
+
+    assert [item["note"] for item in out[0]["items"]] == ["first ride", "second ride"]
+
+
+def test_fill_day_plans_budget_advice_lowers_meal_and_transport_costs():
+    skeleton = [{
+        "day": 1,
+        "items": [
+            {
+                "type": "attraction",
+                "name": "祖庙",
+                "poi_id": "p1",
+                "location": {"lng": 113.11351, "lat": 23.028945},
+                "start": "",
+                "end": "",
+                "indoor": False,
+                "note": "",
+                "cost": 0.0,
+            },
+            {
+                "type": "attraction",
+                "name": "岭南天地",
+                "poi_id": "p2",
+                "location": {"lng": 113.11519, "lat": 23.028895},
+                "start": "",
+                "end": "",
+                "indoor": False,
+                "note": "",
+                "cost": 0.0,
+            },
+        ],
+    }]
+    restaurants = [{"name": "民信老铺", "poi_id": "r1", "lng": 113.114509, "lat": 23.031653}]
+
+    default_out = fill_day_plans(
+        skeleton=skeleton,
+        restaurants=restaurants,
+        weather={},
+        daily_centers=[{"lng": 113.11435, "lat": 23.02892}],
+    )
+    budget_out = fill_day_plans(
+        skeleton=skeleton,
+        restaurants=restaurants,
+        weather={},
+        daily_centers=[{"lng": 113.11435, "lat": 23.02892}],
+        budget_advice={"over_amount": 100.0},
+    )
+
+    default_meal = next(item for item in default_out[0]["items"] if item["type"] == "meal")
+    budget_meal = next(item for item in budget_out[0]["items"] if item["type"] == "meal")
+    default_transport = next(item for item in default_out[0]["items"] if item["type"] == "transport")
+    budget_transport = next(item for item in budget_out[0]["items"] if item["type"] == "transport")
+    assert budget_meal["cost"] < default_meal["cost"]
+    assert budget_transport["cost"] < default_transport["cost"]
+    assert "预算" in budget_meal["note"]
+    assert "预算" in budget_transport["note"]

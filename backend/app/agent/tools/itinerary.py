@@ -124,6 +124,7 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
         daily_centers=daily_centers,
         start_date=start_date,
         num_people=max(1, num_people),
+        budget_advice=budget_advice,
     )
 
     payload = {
@@ -131,8 +132,8 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
         "weather": weather or {},
         "instruction": "只润色 note 字段，不要改 POI、坐标、顺序、时间或费用。",
     }
-    llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
     try:
+        llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
         result = await asyncio.wait_for(
             llm.ainvoke([
                 SystemMessage(content=ITINERARY_SYS),

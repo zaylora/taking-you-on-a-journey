@@ -44,7 +44,13 @@ def _nearest_restaurant(
     return min(available, key=lambda r: _distance2(r, anchor))
 
 
-def _meal_item(restaurant: dict[str, Any], start: int, duration: int = 60) -> dict[str, Any]:
+def _meal_item(
+    restaurant: dict[str, Any],
+    start: int,
+    duration: int = 60,
+    budget_mode: bool = False,
+) -> dict[str, Any]:
+    note = "预算模式下优先就近简餐，减少绕路和餐费。" if budget_mode else "就近安排用餐，减少绕路。"
     return {
         "type": "meal",
         "name": restaurant.get("name", ""),
@@ -53,11 +59,11 @@ def _meal_item(restaurant: dict[str, Any], start: int, duration: int = 60) -> di
         "start": _fmt(start),
         "end": _fmt(start + duration),
         "indoor": True,
-        "note": "就近安排用餐，减少绕路。",
+        "note": note,
         "mode": "",
         "from": "",
         "to": "",
-        "cost": 80.0,
+        "cost": 60.0 if budget_mode else 80.0,
     }
 
 
@@ -66,7 +72,9 @@ def _transport_item(
     nxt: dict[str, Any],
     start: int,
     duration: int = 25,
+    budget_mode: bool = False,
 ) -> dict[str, Any]:
+    note = "预算模式下优先步行或公共交通衔接。" if budget_mode else "按相邻点位预留市内交通时间。"
     return {
         "type": "transport",
         "name": "",
@@ -75,11 +83,11 @@ def _transport_item(
         "start": _fmt(start),
         "end": _fmt(start + duration),
         "indoor": False,
-        "note": "按相邻点位预留市内交通时间。",
+        "note": note,
         "mode": "市内交通",
         "from": prev.get("name", ""),
         "to": nxt.get("name", ""),
-        "cost": 15.0,
+        "cost": 10.0 if budget_mode else 15.0,
     }
 
 
@@ -116,9 +124,11 @@ def fill_day_plans(
     daily_centers: list[dict[str, Any]],
     start_date: str = "",
     num_people: int = 1,
+    budget_advice: dict[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     """Return complete day plans without relying on an LLM."""
     del num_people
+    budget_mode = bool(budget_advice)
     rainy = bool(weather.get("is_rainy", False))
     used_restaurant_ids: set[str] = set()
     plans: list[dict[str, Any]] = []
@@ -130,7 +140,9 @@ def fill_day_plans(
 
         for idx, attraction in enumerate(attractions):
             if idx > 0:
-                filled_items.append(_transport_item(filled_items[-1], attraction, current))
+                filled_items.append(
+                    _transport_item(filled_items[-1], attraction, current, budget_mode=budget_mode)
+                )
                 current += 25
 
             filled_items.append(_attraction_item(attraction, current, rainy))
@@ -143,7 +155,7 @@ def fill_day_plans(
                 if restaurant:
                     used_restaurant_ids.add(restaurant.get("poi_id", restaurant.get("name", "")))
                     meal_start = max(current, 12 * 60) if should_insert_lunch else max(current, 18 * 60)
-                    filled_items.append(_meal_item(restaurant, meal_start))
+                    filled_items.append(_meal_item(restaurant, meal_start, budget_mode=budget_mode))
                     current = meal_start + 60
 
         center = daily_centers[day_index] if day_index < len(daily_centers) else {"lng": 0.0, "lat": 0.0}
@@ -163,8 +175,36 @@ def fill_day_plans(
     return [d.model_dump(by_alias=True) for d in DayPlans(days=plans).days]
 
 
-def _item_key(day: int, item: dict[str, Any]) -> tuple[int, str, str, str]:
-    return (day, item.get("type", ""), item.get("poi_id", ""), item.get("name", ""))
+def _item_key(day: int, index: int, item: dict[str, Any]) -> tuple[int, int, str, str, str]:
+    return (day, index, item.get("type", ""), item.get("poi_id", ""), item.get("name", ""))
+
+
+_STRUCTURAL_ITEM_FIELDS = ("type", "poi_id", "name", "location", "start", "end", "cost", "weather")
+
+
+def _same_item_structure(base_item: dict[str, Any], enriched_item: dict[str, Any]) -> bool:
+    return all(base_item.get(field) == enriched_item.get(field) for field in _STRUCTURAL_ITEM_FIELDS)
+
+
+def _same_day_structure(base: list[dict[str, Any]], enriched: list[dict[str, Any]]) -> bool:
+    if len(base) != len(enriched or []):
+        return False
+
+    for base_day, enriched_day in zip(base, enriched, strict=True):
+        if base_day.get("day") != enriched_day.get("day"):
+            return False
+        if base_day.get("weather") != enriched_day.get("weather"):
+            return False
+
+        base_items = base_day.get("items", []) or []
+        enriched_items = enriched_day.get("items", []) or []
+        if len(base_items) != len(enriched_items):
+            return False
+        item_pairs = zip(base_items, enriched_items, strict=True)
+        if any(not _same_item_structure(base_item, enriched_item) for base_item, enriched_item in item_pairs):
+            return False
+
+    return True
 
 
 def merge_safe_notes(
@@ -172,21 +212,24 @@ def merge_safe_notes(
     enriched: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     """Copy only matching LLM-provided note text onto deterministic day plans."""
-    notes: dict[tuple[int, str, str, str], str] = {}
+    if not _same_day_structure(base, enriched):
+        return base
+
+    notes: dict[tuple[int, int, str, str, str], str] = {}
     for day in enriched or []:
         day_no = int(day.get("day", 0) or 0)
-        for item in day.get("items", []) or []:
+        for index, item in enumerate(day.get("items", []) or []):
             note = item.get("note", "")
             if isinstance(note, str) and note.strip():
-                notes[_item_key(day_no, item)] = note.strip()
+                notes[_item_key(day_no, index, item)] = note.strip()
 
     merged: list[dict[str, Any]] = []
     for day in base:
         copied_day = {**day, "items": []}
         day_no = int(day.get("day", 0) or 0)
-        for item in day.get("items", []) or []:
+        for index, item in enumerate(day.get("items", []) or []):
             copied_item = dict(item)
-            note = notes.get(_item_key(day_no, item))
+            note = notes.get(_item_key(day_no, index, item))
             if note:
                 copied_item["note"] = note
             copied_day["items"].append(copied_item)
