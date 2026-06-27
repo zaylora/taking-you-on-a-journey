@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """Itinerary assembly Agent tool."""
 import asyncio
-import json
 import os
 from typing import Any
 
@@ -127,19 +126,24 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
     )
 
     payload = {
-        "day_plans": deterministic_day_plans,
+        "skeleton": skeleton,
+        "restaurants": _compact_restaurants(restaurants or []),
         "weather": weather or {},
-        "instruction": "只润色 note 字段，不要改 POI、坐标、顺序、时间或费用。",
+        "start_date": start_date,
+        "num_people": max(1, num_people),
     }
+    if budget_advice:
+        payload["budget_advice"] = budget_advice
     llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
     try:
         result = await asyncio.wait_for(
             llm.ainvoke([
                 SystemMessage(content=ITINERARY_SYS),
-                HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+                HumanMessage(content=str(payload)),
             ]),
             timeout=_SOFT_FILL_TIMEOUT_SECONDS,
         )
+        day_plans = [d.model_dump(by_alias=True) for d in result.days]
     except Exception:
         return {
             "day_plans": deterministic_day_plans,
@@ -147,6 +151,6 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
             "warnings": ["itinerary_note_enrichment_failed"],
         }
     return {
-        "day_plans": [d.model_dump(by_alias=True) for d in result.days],
+        "day_plans": day_plans,
         "daily_centers": daily_centers,
     }

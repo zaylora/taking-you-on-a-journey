@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
+import ast
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
@@ -21,6 +22,35 @@ class _FailingStructuredRunnable:
 class _FailingStructuredLLM:
     def with_structured_output(self, *_args, **_kwargs):
         return _FailingStructuredRunnable()
+
+
+class _InvalidStructuredRunnable:
+    async def ainvoke(self, *_args, **_kwargs):
+        return object()
+
+
+class _InvalidStructuredLLM:
+    def with_structured_output(self, *_args, **_kwargs):
+        return _InvalidStructuredRunnable()
+
+
+class _CapturingStructuredRunnable:
+    def __init__(self, result, calls):
+        self._result = result
+        self._calls = calls
+
+    async def ainvoke(self, messages, **_kwargs):
+        self._calls.append(messages)
+        return self._result
+
+
+class _CapturingStructuredLLM:
+    def __init__(self, result, calls):
+        self._result = result
+        self._calls = calls
+
+    def with_structured_output(self, *_args, **_kwargs):
+        return _CapturingStructuredRunnable(self._result, self._calls)
 
 
 def _schema_property(tool_obj, field_name: str) -> dict:
@@ -314,6 +344,53 @@ async def test_assemble_itinerary_runs_ortools_pipeline(fake_amap, monkeypatch, 
 
 
 @pytest.mark.asyncio
+async def test_assemble_itinerary_success_uses_skeleton_soft_fill_payload(fake_amap, monkeypatch, tmp_path):
+    calls = []
+    fake = DayPlans(days=[{"day": 1, "items": [
+        {"type": "attraction", "name": "祖庙", "poi_id": "p1", "cost": 20}]}])
+    monkeypatch.setattr(
+        "app.agent.tools.itinerary.build_llm",
+        lambda *_a, **_k: _CapturingStructuredLLM(fake, calls),
+    )
+    monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    await tools.assemble_itinerary.ainvoke({
+        "city": "佛山",
+        "days": 1,
+        "attractions": [
+            {"name": "祖庙", "poi_id": "p1", "lng": 113.11351, "lat": 23.028945, "rating": 5.0},
+            {"name": "岭南天地", "poi_id": "p2", "lng": 113.11519, "lat": 23.028895, "rating": 4.8},
+        ],
+        "restaurants": [{"name": "民信老铺", "poi_id": "r1", "lng": 113.114509, "lat": 23.031653}],
+        "weather": {"text": "晴"},
+        "start_date": "2026-07-01",
+        "num_people": 2,
+        "budget_advice": {"over_amount": 100.0},
+    })
+    get_settings.cache_clear()
+
+    payload = ast.literal_eval(calls[0][1].content)
+    assert set(payload) == {
+        "skeleton", "restaurants", "weather", "start_date", "num_people", "budget_advice",
+    }
+    assert "day_plans" not in payload
+    assert payload["restaurants"] == [{
+        "name": "民信老铺",
+        "poi_id": "r1",
+        "lng": 113.114509,
+        "lat": 23.031653,
+        "address": "",
+        "type": "",
+    }]
+    assert payload["weather"] == {"text": "晴"}
+    assert payload["start_date"] == "2026-07-01"
+    assert payload["num_people"] == 2
+    assert payload["budget_advice"] == {"over_amount": 100.0}
+
+
+@pytest.mark.asyncio
 async def test_assemble_itinerary_empty_candidates(fake_amap, monkeypatch):
     monkeypatch.setattr("app.agent.tools.itinerary.build_llm",
                         make_fake_build_llm(structured=DayPlans(days=[])))
@@ -327,6 +404,35 @@ async def test_assemble_itinerary_empty_candidates(fake_amap, monkeypatch):
 @pytest.mark.asyncio
 async def test_assemble_itinerary_degrades_to_skeleton_when_soft_fill_fails(fake_amap, monkeypatch, tmp_path):
     monkeypatch.setattr("app.agent.tools.itinerary.build_llm", lambda *_a, **_k: _FailingStructuredLLM())
+    monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    out = await tools.assemble_itinerary.ainvoke({
+        "city": "佛山",
+        "days": 1,
+        "attractions": [
+            {"name": "祖庙", "poi_id": "p1", "lng": 113.11351, "lat": 23.028945, "rating": 5.0},
+            {"name": "岭南天地", "poi_id": "p2", "lng": 113.11519, "lat": 23.028895, "rating": 4.8},
+        ],
+        "restaurants": [
+            {"name": "民信老铺", "poi_id": "r1", "lng": 113.114509, "lat": 23.031653},
+        ],
+        "weather": {"text": "雷阵雨", "temp": "26~32℃", "is_rainy": True},
+    })
+    get_settings.cache_clear()
+
+    names = {item["name"] for item in out["day_plans"][0]["items"]}
+    assert {"祖庙", "岭南天地", "民信老铺"} <= names
+    assert out["day_plans"][0]["weather"]["text"] == "雷阵雨"
+    assert out["day_plans"][0]["center"] == out["daily_centers"][0]
+    assert all(item["start"] and item["end"] for item in out["day_plans"][0]["items"])
+    assert out["warnings"] == ["itinerary_note_enrichment_failed"]
+
+
+@pytest.mark.asyncio
+async def test_assemble_itinerary_degrades_to_skeleton_when_soft_fill_output_invalid(fake_amap, monkeypatch, tmp_path):
+    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", lambda *_a, **_k: _InvalidStructuredLLM())
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
     from app.core.config import get_settings
     get_settings.cache_clear()
