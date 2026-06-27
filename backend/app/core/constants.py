@@ -28,6 +28,7 @@ NODE_LABELS = {
 
 # 工具名 → 前端展示的友好中文文案（用于 tool_call / tool_result 过程链）
 TOOL_LABELS = {
+    "get_current_time": "获取当前时间",
     "search_attractions": "搜索景点",
     "search_restaurants": "搜索餐厅",
     "get_weather": "查询天气",

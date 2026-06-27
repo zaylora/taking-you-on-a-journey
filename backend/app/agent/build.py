@@ -5,14 +5,15 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.prompt import TRIP_AGENT_SYS
 from app.agent.state import TripState
+from app.agent.time_context import CurrentTimePromptMiddleware
 from app.agent.tools import (
-    search_attractions, search_restaurants, get_weather, plan_route,
+    get_current_time, search_attractions, search_restaurants, get_weather, plan_route,
     assemble_itinerary, assign_hotels, compute_budget_tool, finalize_plan,
 )
 from app.llm.factory import build_llm
 
 _TOOLS = [
-    search_attractions, search_restaurants, get_weather, plan_route,
+    get_current_time, search_attractions, search_restaurants, get_weather, plan_route,
     assemble_itinerary, assign_hotels, compute_budget_tool, finalize_plan,
 ]
 
@@ -28,6 +29,7 @@ def build_trip_agent(checkpointer=_DEFAULT):
         model=build_llm(temperature=0, disable_streaming=False),
         tools=_TOOLS,
         system_prompt=TRIP_AGENT_SYS,
+        middleware=[CurrentTimePromptMiddleware()],
         state_schema=TripState,
         checkpointer=checkpointer,
     )

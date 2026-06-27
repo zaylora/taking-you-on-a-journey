@@ -1,7 +1,11 @@
 # -*- coding: utf-8 -*-
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 import pytest
 
 from app.agent import tools
+from app.agent.time_context import current_time_payload
 from app.agent.planning import DayPlans
 from app.agent.lodging import _AccoResult
 from tests.conftest import make_fake_build_llm
@@ -24,6 +28,27 @@ def test_plan_route_schema_describes_coordinate_inputs():
         assert "地名" in description
 
     assert "transit" in mode.get("description", "")
+
+
+def test_current_time_payload_uses_requested_timezone():
+    now = datetime(2026, 6, 27, 8, 9, 10, tzinfo=ZoneInfo("UTC"))
+    out = current_time_payload("Asia/Shanghai", now=now)
+
+    assert out["date"] == "2026-06-27"
+    assert out["time"] == "16:09:10"
+    assert out["timezone"] == "Asia/Shanghai"
+    assert out["weekday"] == "Saturday"
+    assert out["utc_offset"] == "+08:00"
+
+
+def test_get_current_time_schema_and_output_shape():
+    timezone = _schema_property(tools.get_current_time, "timezone")
+    assert "IANA" in timezone.get("description", "")
+
+    out = tools.get_current_time.invoke({"timezone": "UTC"})
+    assert set(out) == {"iso", "timezone", "unix_ms", "date", "time", "weekday", "utc_offset"}
+    assert out["timezone"] == "UTC"
+    assert out["utc_offset"] == "+00:00"
 
 
 @pytest.mark.asyncio

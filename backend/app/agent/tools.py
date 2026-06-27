@@ -28,6 +28,7 @@ from app.agent.planning import DayPlans, ITINERARY_SYS
 from app.agent.lodging import (
     overnight_days, attach_hotels, hotel_keyword, _AccoResult, ACCO_SYS,
 )
+from app.agent.time_context import CurrentTimeArgs, current_time_payload
 from app.llm.factory import build_llm
 
 
@@ -140,6 +141,12 @@ def _distance_cache_path() -> str:
     ckpt = get_settings().checkpoint_db_path
     d = os.path.dirname(ckpt) or "."
     return os.path.join(d, "distance_cache.sqlite")
+
+
+@tool(args_schema=CurrentTimeArgs)
+def get_current_time(timezone: str = "") -> dict:
+    """获取当前真实时间。返回 {iso, timezone, unix_ms, date, time, weekday, utc_offset}。"""
+    return current_time_payload(timezone or None)
 
 
 @tool

@@ -48,6 +48,9 @@ class Settings(BaseSettings):
 
     temperature: float = 0.0
 
+    # Agent 时间感知默认时区；可用 AGENT_TIMEZONE 覆盖。
+    agent_timezone: str = "Asia/Shanghai"
+
     # LLM 请求重试次数：中转上游偶发 502/超时时自动退避重试（SDK 默认仅 2 次）。
     llm_max_retries: int = 5
 
