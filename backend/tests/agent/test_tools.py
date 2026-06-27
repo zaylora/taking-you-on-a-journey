@@ -13,6 +13,16 @@ from app.agent.itinerary.lodging import _AccoResult
 from tests.conftest import make_fake_build_llm
 
 
+class _FailingStructuredRunnable:
+    async def ainvoke(self, *_args, **_kwargs):
+        raise TimeoutError("soft fill timed out")
+
+
+class _FailingStructuredLLM:
+    def with_structured_output(self, *_args, **_kwargs):
+        return _FailingStructuredRunnable()
+
+
 def _schema_property(tool_obj, field_name: str) -> dict:
     return tool_obj.args_schema.model_json_schema()["properties"][field_name]
 
@@ -312,6 +322,35 @@ async def test_assemble_itinerary_empty_candidates(fake_amap, monkeypatch):
     })
     assert out["day_plans"] == []
     assert out["daily_centers"] == []
+
+
+@pytest.mark.asyncio
+async def test_assemble_itinerary_degrades_to_skeleton_when_soft_fill_fails(fake_amap, monkeypatch, tmp_path):
+    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", lambda *_a, **_k: _FailingStructuredLLM())
+    monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    out = await tools.assemble_itinerary.ainvoke({
+        "city": "佛山",
+        "days": 1,
+        "attractions": [
+            {"name": "祖庙", "poi_id": "p1", "lng": 113.11351, "lat": 23.028945, "rating": 5.0},
+            {"name": "岭南天地", "poi_id": "p2", "lng": 113.11519, "lat": 23.028895, "rating": 4.8},
+        ],
+        "restaurants": [
+            {"name": "民信老铺", "poi_id": "r1", "lng": 113.114509, "lat": 23.031653},
+        ],
+        "weather": {"text": "雷阵雨", "temp": "26~32℃", "is_rainy": True},
+    })
+    get_settings.cache_clear()
+
+    names = {item["name"] for item in out["day_plans"][0]["items"]}
+    assert {"祖庙", "岭南天地", "民信老铺"} <= names
+    assert out["day_plans"][0]["weather"]["text"] == "雷阵雨"
+    assert out["day_plans"][0]["center"] == out["daily_centers"][0]
+    assert all(item["start"] and item["end"] for item in out["day_plans"][0]["items"])
+    assert out["warnings"] == ["itinerary_note_enrichment_failed"]
 
 
 @pytest.mark.asyncio

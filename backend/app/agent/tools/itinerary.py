@@ -1,5 +1,7 @@
 # -*- coding: utf-8 -*-
 """Itinerary assembly Agent tool."""
+import asyncio
+import json
 import os
 from typing import Any
 
@@ -7,6 +9,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
+from app.agent.itinerary.fill import fill_day_plans
 from app.agent.itinerary.schemas import DayPlans, ITINERARY_SYS
 from app.agent.itinerary.routing.assembler import routes_to_day_plans
 from app.agent.itinerary.routing.matrix import duration_matrix
@@ -16,6 +19,9 @@ from app.core.config import get_settings
 from app.llm.factory import build_llm
 
 from .utils import parse_jsonish_string
+
+_SOFT_FILL_TIMEOUT_SECONDS = 45
+_MAX_RESTAURANTS_FOR_SOFT_FILL = 8
 
 
 class AssembleItineraryArgs(BaseModel):
@@ -65,6 +71,20 @@ def _distance_cache_path() -> str:
     return os.path.join(d, "distance_cache.sqlite")
 
 
+def _compact_restaurants(restaurants: list[dict]) -> list[dict]:
+    compact = []
+    for r in (restaurants or [])[:_MAX_RESTAURANTS_FOR_SOFT_FILL]:
+        compact.append({
+            "name": r.get("name", ""),
+            "poi_id": r.get("poi_id", ""),
+            "lng": r.get("lng", 0.0),
+            "lat": r.get("lat", 0.0),
+            "address": r.get("address", ""),
+            "type": r.get("type", ""),
+        })
+    return compact
+
+
 @tool(args_schema=AssembleItineraryArgs)
 async def assemble_itinerary(city: str, days: int, attractions: list, restaurants: list,
                              weather: dict, start_date: str = "", num_people: int = 1,
@@ -97,18 +117,35 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
             dx = dy = 0.0
         daily_centers.append({"lng": dx, "lat": dy})
 
-    # soft_fill：LLM 填时间/cost/note + 就近插餐厅，不改顺序与分天
+    deterministic_day_plans = fill_day_plans(
+        skeleton=skeleton,
+        restaurants=_compact_restaurants(restaurants or []),
+        weather=weather or {},
+        daily_centers=daily_centers,
+        start_date=start_date,
+        num_people=max(1, num_people),
+    )
+
     payload = {
-        "skeleton": skeleton, "restaurants": restaurants or [], "weather": weather or {},
-        "start_date": start_date, "num_people": max(1, num_people),
+        "day_plans": deterministic_day_plans,
+        "weather": weather or {},
+        "instruction": "只润色 note 字段，不要改 POI、坐标、顺序、时间或费用。",
     }
-    if budget_advice:
-        payload["budget_advice"] = budget_advice
     llm = build_llm(temperature=0).with_structured_output(DayPlans, method="function_calling")
-    result = await llm.ainvoke([
-        SystemMessage(content=ITINERARY_SYS),
-        HumanMessage(content=str(payload)),
-    ])
+    try:
+        result = await asyncio.wait_for(
+            llm.ainvoke([
+                SystemMessage(content=ITINERARY_SYS),
+                HumanMessage(content=json.dumps(payload, ensure_ascii=False)),
+            ]),
+            timeout=_SOFT_FILL_TIMEOUT_SECONDS,
+        )
+    except Exception:
+        return {
+            "day_plans": deterministic_day_plans,
+            "daily_centers": daily_centers,
+            "warnings": ["itinerary_note_enrichment_failed"],
+        }
     return {
         "day_plans": [d.model_dump(by_alias=True) for d in result.days],
         "daily_centers": daily_centers,
