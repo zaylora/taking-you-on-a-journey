@@ -161,3 +161,34 @@ def fill_day_plans(
         })
 
     return [d.model_dump(by_alias=True) for d in DayPlans(days=plans).days]
+
+
+def _item_key(day: int, item: dict[str, Any]) -> tuple[int, str, str, str]:
+    return (day, item.get("type", ""), item.get("poi_id", ""), item.get("name", ""))
+
+
+def merge_safe_notes(
+    base: list[dict[str, Any]],
+    enriched: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Copy only matching LLM-provided note text onto deterministic day plans."""
+    notes: dict[tuple[int, str, str, str], str] = {}
+    for day in enriched or []:
+        day_no = int(day.get("day", 0) or 0)
+        for item in day.get("items", []) or []:
+            note = item.get("note", "")
+            if isinstance(note, str) and note.strip():
+                notes[_item_key(day_no, item)] = note.strip()
+
+    merged: list[dict[str, Any]] = []
+    for day in base:
+        copied_day = {**day, "items": []}
+        day_no = int(day.get("day", 0) or 0)
+        for item in day.get("items", []) or []:
+            copied_item = dict(item)
+            note = notes.get(_item_key(day_no, item))
+            if note:
+                copied_item["note"] = note
+            copied_day["items"].append(copied_item)
+        merged.append(copied_day)
+    return merged

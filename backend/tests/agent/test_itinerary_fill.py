@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from app.agent.itinerary.fill import fill_day_plans
+from app.agent.itinerary.fill import fill_day_plans, merge_safe_notes
 
 
 def test_fill_day_plans_adds_weather_center_times_and_meals():
@@ -82,3 +82,27 @@ def test_fill_day_plans_does_not_invent_restaurants_when_candidates_empty():
 
     assert [item["type"] for item in out[0]["items"]] == ["attraction"]
     assert out[0]["items"][0]["name"] == "清晖园"
+
+
+def test_merge_safe_notes_only_updates_matching_notes():
+    base = [{
+        "day": 1,
+        "items": [
+            {"type": "attraction", "name": "祖庙", "poi_id": "p1", "location": {"lng": 1, "lat": 2}, "note": "old"},
+            {"type": "meal", "name": "民信老铺", "poi_id": "r1", "location": {"lng": 3, "lat": 4}, "note": "meal old"},
+        ],
+    }]
+    enriched = [{
+        "day": 1,
+        "items": [
+            {"type": "attraction", "name": "祖庙", "poi_id": "p1", "location": {"lng": 999, "lat": 999}, "note": "适合雨天慢逛。"},
+            {"type": "meal", "name": "不存在餐厅", "poi_id": "fake", "location": {"lng": 0, "lat": 0}, "note": "must ignore"},
+        ],
+    }]
+
+    out = merge_safe_notes(base, enriched)
+
+    assert out[0]["items"][0]["note"] == "适合雨天慢逛。"
+    assert out[0]["items"][0]["location"] == {"lng": 1, "lat": 2}
+    assert out[0]["items"][1]["note"] == "meal old"
+    assert len(out[0]["items"]) == 2

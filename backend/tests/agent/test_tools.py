@@ -339,7 +339,7 @@ async def test_assemble_itinerary_runs_ortools_pipeline(fake_amap, monkeypatch, 
     })
     get_settings.cache_clear()
     assert out["day_plans"][0]["day"] == 1
-    assert out["day_plans"][0]["items"][0]["name"] == "故宫"
+    assert {item["name"] for item in out["day_plans"][0]["items"] if item["type"] == "attraction"} == {"故宫", "天坛"}
     assert "daily_centers" in out
 
 
@@ -388,6 +388,54 @@ async def test_assemble_itinerary_success_uses_skeleton_soft_fill_payload(fake_a
     assert payload["start_date"] == "2026-07-01"
     assert payload["num_people"] == 2
     assert payload["budget_advice"] == {"over_amount": 100.0}
+
+
+@pytest.mark.asyncio
+async def test_assemble_itinerary_success_only_merges_matching_llm_notes(fake_amap, monkeypatch, tmp_path):
+    fake = DayPlans(days=[{"day": 1, "items": [
+        {
+            "type": "attraction",
+            "name": "祖庙",
+            "poi_id": "p1",
+            "location": {"lng": 999, "lat": 999},
+            "note": "适合雨天慢逛。",
+            "cost": 999,
+        },
+        {
+            "type": "attraction",
+            "name": "不存在景点",
+            "poi_id": "fake",
+            "location": {"lng": 0, "lat": 0},
+            "note": "must ignore",
+        },
+    ]}])
+    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", make_fake_build_llm(structured=fake))
+    monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    out = await tools.assemble_itinerary.ainvoke({
+        "city": "佛山",
+        "days": 1,
+        "attractions": [
+            {"name": "祖庙", "poi_id": "p1", "lng": 113.11351, "lat": 23.028945, "rating": 5.0},
+            {"name": "岭南天地", "poi_id": "p2", "lng": 113.11519, "lat": 23.028895, "rating": 4.8},
+        ],
+        "restaurants": [
+            {"name": "民信老铺", "poi_id": "r1", "lng": 113.114509, "lat": 23.031653},
+        ],
+        "weather": {"text": "雷阵雨", "temp": "26~32℃", "is_rainy": True},
+    })
+    get_settings.cache_clear()
+
+    items = out["day_plans"][0]["items"]
+    attractions = [item for item in items if item["type"] == "attraction"]
+    assert {item["name"] for item in attractions} == {"祖庙", "岭南天地"}
+    zumiao = next(item for item in attractions if item["poi_id"] == "p1")
+    assert zumiao["location"] == {"lng": 113.11351, "lat": 23.028945}
+    assert zumiao["cost"] == 0.0
+    assert zumiao["note"] == "适合雨天慢逛。"
+    assert all(item["poi_id"] != "fake" for item in items)
 
 
 @pytest.mark.asyncio

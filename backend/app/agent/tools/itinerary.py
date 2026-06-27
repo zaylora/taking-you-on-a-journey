@@ -8,7 +8,7 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
-from app.agent.itinerary.fill import fill_day_plans
+from app.agent.itinerary.fill import fill_day_plans, merge_safe_notes
 from app.agent.itinerary.schemas import DayPlans, ITINERARY_SYS
 from app.agent.itinerary.routing.assembler import routes_to_day_plans
 from app.agent.itinerary.routing.matrix import duration_matrix
@@ -143,7 +143,10 @@ async def assemble_itinerary(city: str, days: int, attractions: list, restaurant
             ]),
             timeout=_SOFT_FILL_TIMEOUT_SECONDS,
         )
-        day_plans = [d.model_dump(by_alias=True) for d in result.days]
+        day_plans = merge_safe_notes(
+            deterministic_day_plans,
+            [d.model_dump(by_alias=True) for d in result.days],
+        )
     except Exception:
         return {
             "day_plans": deterministic_day_plans,
