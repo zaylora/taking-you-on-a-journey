@@ -7,6 +7,10 @@ from app.agent.tools.time import get_current_time
 from app.agent.tools.trip import (
     get_weather, plan_route, search_attractions, search_restaurants,
 )
+from app.agent.tools.xhs import (
+    research_xhs_travel_guide, xhs_hot_notes, xhs_note_comments, xhs_read_note,
+    xhs_search_notes, xhs_status, xhs_user_profile,
+)
 
 __all__ = [
     "get_current_time",
@@ -18,4 +22,11 @@ __all__ = [
     "assign_hotels",
     "compute_budget_tool",
     "finalize_plan",
+    "xhs_status",
+    "research_xhs_travel_guide",
+    "xhs_search_notes",
+    "xhs_read_note",
+    "xhs_note_comments",
+    "xhs_hot_notes",
+    "xhs_user_profile",
 ]

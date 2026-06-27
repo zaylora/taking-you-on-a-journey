@@ -5,7 +5,9 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.agent import tools
+from app.agent.build import _TOOLS
 from app.agent.time_context import current_time_payload
+from app.agent.tools import xhs as xhs_tools
 from app.agent.itinerary.schemas import DayPlans
 from app.agent.itinerary.lodging import _AccoResult
 from tests.conftest import make_fake_build_llm
@@ -51,6 +53,176 @@ def test_get_current_time_schema_and_output_shape():
     assert out["utc_offset"] == "+00:00"
 
 
+def test_xhs_tools_are_registered_with_agent():
+    tool_names = {getattr(t, "name", "") for t in _TOOLS}
+
+    assert {
+        "xhs_status",
+        "research_xhs_travel_guide",
+        "xhs_search_notes",
+        "xhs_read_note",
+        "xhs_note_comments",
+        "xhs_hot_notes",
+        "xhs_user_profile",
+    } <= tool_names
+
+
+def test_xhs_command_supports_configurable_binary(monkeypatch):
+    monkeypatch.setenv("XHS_CLI_BIN", "uv run xhs")
+
+    assert xhs_tools._xhs_command(["status"]) == ["uv", "run", "xhs", "status", "--json"]
+
+
+def test_xhs_normalize_cli_result_preserves_success_envelope():
+    out = xhs_tools._normalize_cli_result(
+        0,
+        b'{"ok": true, "schema_version": "1", "data": {"items": []}}',
+        b"",
+    )
+
+    assert out["ok"] is True
+    assert out["data"]["items"] == []
+
+
+def test_xhs_normalize_cli_result_redacts_failure_text():
+    out = xhs_tools._normalize_cli_result(
+        1,
+        b"",
+        b"cookie=a1-secret web_session=secret-token failed",
+    )
+
+    assert out["ok"] is False
+    assert "a1-secret" not in out["error"]["message"]
+    assert "secret-token" not in out["error"]["message"]
+
+
+def test_xhs_extract_note_targets_from_nested_search_result():
+    result = {
+        "ok": True,
+        "data": {
+            "items": [
+                {"note_id": "note-a", "title": "A"},
+                {"note": {"url": "https://xhslink.com/b", "title": "B"}},
+                {"id": "user-1", "user_id": "user-1"},
+                {"id": "note-c", "title": "C"},
+            ]
+        },
+    }
+
+    assert xhs_tools._extract_note_targets(result, limit=3) == [
+        "note-a",
+        "https://xhslink.com/b",
+        "note-c",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_xhs_search_notes_builds_safe_cli_args(monkeypatch):
+    calls = []
+
+    async def _fake_run(args):
+        calls.append(args)
+        return {"ok": True, "data": {"items": []}}
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+
+    out = await tools.xhs_search_notes.ainvoke({
+        "keyword": "顺德美食",
+        "sort": "popular",
+        "note_type": "image",
+        "page": 2,
+    })
+
+    assert out["ok"] is True
+    assert calls == [[
+        "search", "顺德美食",
+        "--sort", "popular",
+        "--type", "image",
+        "--page", "2",
+    ]]
+
+
+@pytest.mark.asyncio
+async def test_xhs_note_comments_can_request_all_comments(monkeypatch):
+    calls = []
+
+    async def _fake_run(args):
+        calls.append(args)
+        return {"ok": True, "data": {"comments": []}}
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+
+    await tools.xhs_note_comments.ainvoke({"target": "note-1", "include_all": True})
+
+    assert calls == [["comments", "note-1", "--all"]]
+
+
+@pytest.mark.asyncio
+async def test_research_xhs_travel_guide_extracts_structured_brief(monkeypatch):
+    calls = []
+
+    async def _fake_run(args):
+        calls.append(args)
+        if args[0] == "search":
+            return {"ok": True, "data": {"items": [{"note_id": "note-1"}, {"note_id": "note-2"}]}}
+        if args[0] == "read":
+            return {"ok": True, "data": {"title": f"{args[1]} 攻略", "desc": "09:00 去清晖园，人少好拍"}}
+        if args[0] == "comments":
+            return {"ok": True, "data": {"comments": [{"content": "节假日排队久"}]}}
+        return {"ok": True, "data": {}}
+
+    brief = xhs_tools.XhsTravelBrief(
+        city="顺德",
+        summary="早上适合清晖园，午餐围绕华盖路。",
+        recommended_places=[
+            xhs_tools.XhsRecommendedPlace(
+                name="清晖园",
+                reason="多篇攻略提到上午人少，适合拍照。",
+                priority="high",
+                source_count=2,
+            )
+        ],
+        time_suggestions=[
+            xhs_tools.XhsTimeSuggestion(
+                time="09:00",
+                place="清晖园",
+                activity="游览拍照",
+                reason="上午人少。",
+            )
+        ],
+        route_patterns=["清晖园 -> 华盖路步行街"],
+        food_keywords=["双皮奶"],
+        tips=["节假日注意排队"],
+        avoid_notes=["网红店评价两极分化"],
+        amap_query_hints=["清晖园", "华盖路步行街", "双皮奶"],
+    )
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+    monkeypatch.setattr(xhs_tools, "build_llm", make_fake_build_llm(structured=brief))
+
+    out = await tools.research_xhs_travel_guide.ainvoke({
+        "city": "顺德",
+        "days": 1,
+        "travel_style": "美食慢游",
+        "keywords": ["避雷"],
+        "max_notes": 2,
+        "include_comments": True,
+    })
+
+    assert out["ok"] is True
+    assert out["data"]["recommended_places"][0]["name"] == "清晖园"
+    assert out["data"]["time_suggestions"][0]["time"] == "09:00"
+    assert out["data"]["amap_query_hints"] == ["清晖园", "华盖路步行街", "双皮奶"]
+    assert out["meta"]["source_note_count"] == 2
+    assert calls == [
+        ["search", "顺德旅游攻略", "--sort", "popular", "--type", "all", "--page", "1"],
+        ["read", "note-1"],
+        ["comments", "note-1"],
+        ["read", "note-2"],
+        ["comments", "note-2"],
+    ]
+
+
 @pytest.mark.asyncio
 async def test_search_attractions_returns_pois(fake_amap):
     fake_amap["search_poi"] = [{"name": "故宫", "poi_id": "p1", "lng": 116.4, "lat": 39.9}]
@@ -78,7 +250,7 @@ async def test_search_attractions_splits_keywords_when_sparse(monkeypatch):
             return []
         return [{"name": keywords, "poi_id": keywords, "lng": 113.0, "lat": 23.0}]
 
-    monkeypatch.setattr("app.tools.amap.search_poi", _search_poi)
+    monkeypatch.setattr("app.agent.tools.trip.amap.search_poi", _search_poi)
 
     out = await tools.search_attractions.ainvoke({
         "city": "佛山",
@@ -97,7 +269,7 @@ async def test_search_attractions_splits_keywords_when_sparse(monkeypatch):
 async def test_search_attractions_degrades_to_empty(fake_amap, monkeypatch):
     async def _boom(*a, **k):
         raise RuntimeError("amap down")
-    monkeypatch.setattr("app.tools.amap.search_poi", _boom)
+    monkeypatch.setattr("app.agent.tools.trip.amap.search_poi", _boom)
     out = await tools.search_attractions.ainvoke({"city": "北京", "keywords": "x"})
     assert out == []
 

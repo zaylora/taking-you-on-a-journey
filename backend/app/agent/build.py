@@ -9,12 +9,16 @@ from app.agent.time_context import CurrentTimePromptMiddleware
 from app.agent.tools import (
     get_current_time, search_attractions, search_restaurants, get_weather, plan_route,
     assemble_itinerary, assign_hotels, compute_budget_tool, finalize_plan,
+    xhs_status, research_xhs_travel_guide, xhs_search_notes, xhs_read_note,
+    xhs_note_comments, xhs_hot_notes, xhs_user_profile,
 )
 from app.llm.factory import build_llm
 
 _TOOLS = [
     get_current_time, search_attractions, search_restaurants, get_weather, plan_route,
     assemble_itinerary, assign_hotels, compute_budget_tool, finalize_plan,
+    xhs_status, research_xhs_travel_guide, xhs_search_notes, xhs_read_note,
+    xhs_note_comments, xhs_hot_notes, xhs_user_profile,
 ]
 
 # 用哨兵区分「未传 checkpointer」（默认 MemorySaver）与「显式不要 checkpointer」（None）。
