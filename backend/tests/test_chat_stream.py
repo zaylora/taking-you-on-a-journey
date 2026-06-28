@@ -35,15 +35,31 @@ def test_render_xhs_sources_empty_returns_blank():
     assert render_xhs_sources([]) == ""
 
 
-def test_render_xhs_sources_skips_missing_url_and_limits():
+def test_render_xhs_sources_skips_missing_url():
+    """验证无 url 的记录被跳过，且不被 limit 掩盖。"""
     md = render_xhs_sources(
         [
             {"title": "A", "url": "https://x/1"},
             {"title": "B", "url": ""},
             {"title": "C", "url": "https://x/3"},
         ],
-        limit=1,
+        limit=6,
     )
     assert "[A](https://x/1)" in md
-    assert "B" not in md  # 无 url 跳过
-    assert "C" not in md  # 超过 limit
+    assert "B" not in md       # 无 url 跳过
+    assert "[C](https://x/3)" in md  # limit 足够大，C 应被渲染
+
+
+def test_render_xhs_sources_limits():
+    """验证 limit 截断：仅渲染前 N 条，超出部分不出现。"""
+    md = render_xhs_sources(
+        [
+            {"title": "A", "url": "https://x/1"},
+            {"title": "B", "url": "https://x/2"},
+            {"title": "C", "url": "https://x/3"},
+        ],
+        limit=2,
+    )
+    assert "[A](https://x/1)" in md
+    assert "[B](https://x/2)" in md
+    assert "C" not in md       # 超出 limit
