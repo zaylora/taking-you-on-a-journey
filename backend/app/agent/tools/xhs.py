@@ -30,6 +30,19 @@ _IMAGE_CONTAINER_KEYS = {
 }
 _IMAGE_URL_KEYS = {"url", "url_default", "url_pre", "src", "href"}
 _NON_NOTE_IMAGE_HINTS = ("avatar", "profile", "icon", "emoji")
+_XHS_EXPLORE_BASE = "https://www.xiaohongshu.com/explore/"
+
+
+def _build_note_url(note_id: str, xsec_token: str = "") -> str:
+    """拼小红书笔记 URL。有 xsec_token 时拼可直接点开的完整链接，否则降级为裸 explore 链接。"""
+    nid = (note_id or "").strip()
+    if not nid:
+        return ""
+    token = (xsec_token or "").strip()
+    if token:
+        return f"{_XHS_EXPLORE_BASE}{nid}?xsec_token={token}&xsec_source=pc_search"
+    return f"{_XHS_EXPLORE_BASE}{nid}"
+
 
 _XHS_IMAGE_SYS = """# 小红书图文解析
 

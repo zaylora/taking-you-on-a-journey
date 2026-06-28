@@ -870,3 +870,16 @@ async def test_finalize_plan_writes_and_diffs(fake_amap):
     assert cmd.update["day_plans"] == new_dps
     assert cmd.update["changed_days"] == [1]
     assert cmd.update["plan_version"] == 1
+
+
+def test_build_note_url_with_token():
+    url = xhs_tools._build_note_url("abc123", "TOKENXYZ")
+    assert url == "https://www.xiaohongshu.com/explore/abc123?xsec_token=TOKENXYZ&xsec_source=pc_search"
+
+
+def test_build_note_url_without_token_degrades():
+    assert xhs_tools._build_note_url("abc123", "") == "https://www.xiaohongshu.com/explore/abc123"
+
+
+def test_build_note_url_empty_id_returns_empty():
+    assert xhs_tools._build_note_url("", "TOKEN") == ""
