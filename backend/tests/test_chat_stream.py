@@ -11,7 +11,6 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from app.core.constants import TOOL_LABELS
 from app.graph.stream import sse_events
 from app.services.session_store import SessionStore
 
@@ -94,7 +93,11 @@ class _FakeGraphWithSources:
         })
 
     async def astream_events(self, _stream_input, *, config, version):
-        yield {"event": "on_tool_start", "name": "research_xhs_travel_guide"}
+        yield {
+            "event": "on_tool_start",
+            "name": "research_xhs_travel_guide",
+            "data": {"input": {"city": "顺德", "days": 1, "travel_style": "美食"}},
+        }
         yield {"event": "on_tool_end", "name": "research_xhs_travel_guide"}
         yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="这是顺德攻略。")}}
 
@@ -178,12 +181,18 @@ async def test_sse_events_persists_ui_history_matching_realtime_stream(tmp_path)
             "tool_steps": [
                 {
                     "tool": "research_xhs_travel_guide",
-                    "label": TOOL_LABELS.get("research_xhs_travel_guide", "research_xhs_travel_guide"),
+                    "label": "研究顺德1天美食小红书攻略",
                     "status": "done",
                 },
             ],
         },
     ]
+
+    tool_call = next(event for event in events if event["event"] == "tool_call")
+    assert json.loads(tool_call["data"]) == {
+        "tool": "research_xhs_travel_guide",
+        "label": "研究顺德1天美食小红书攻略",
+    }
 
 
 @pytest.mark.anyio

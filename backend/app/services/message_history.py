@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.core.constants import TOOL_LABELS
+from app.services.tool_labels import build_tool_label
 
 _XHS_SOURCE_LIMIT = 6
 _XHS_SOURCE_FALLBACK_TITLE = "小红书笔记"
@@ -49,7 +49,11 @@ def is_summarization_message(message) -> bool:
 
 def tool_steps(message) -> list[dict]:
     return [
-        {"tool": tc["name"], "label": TOOL_LABELS.get(tc["name"], tc["name"]), "status": "done"}
+        {
+            "tool": tc["name"],
+            "label": build_tool_label(tc.get("name"), tc.get("args") or {}),
+            "status": "done",
+        }
         for tc in (getattr(message, "tool_calls", None) or [])
     ]
 

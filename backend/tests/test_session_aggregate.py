@@ -41,6 +41,35 @@ def test_multi_ai_round_collapses_into_single_assistant():
     assert all(s["status"] == "done" for s in assistant["tool_steps"])
 
 
+def test_tool_step_labels_use_tool_call_args():
+    messages = [
+        HumanMessage(content="帮我做顺德攻略"),
+        AIMessage(
+            content="",
+            tool_calls=[
+                {
+                    "name": "research_xhs_travel_guide",
+                    "args": {"city": "顺德", "days": 2, "travel_style": "美食"},
+                    "id": "call_0",
+                },
+                {
+                    "name": "search_restaurants",
+                    "args": {"city": "佛山", "keywords": "顺德早茶"},
+                    "id": "call_1",
+                },
+            ],
+        ),
+        AIMessage(content="好了。"),
+    ]
+
+    result = _aggregate_messages(messages)
+
+    assert [step["label"] for step in result[1]["tool_steps"]] == [
+        "研究顺德2天美食小红书攻略",
+        "搜索佛山餐厅：顺德早茶",
+    ]
+
+
 def test_human_message_starts_new_assistant_round():
     messages = [
         HumanMessage(content="第一问"),

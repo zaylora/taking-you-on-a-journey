@@ -9,7 +9,7 @@ logger = logging.getLogger(__name__)
 from app.core.constants import (
     EVENT_SESSION, EVENT_NODE_START, EVENT_TOKEN, EVENT_NODE_END,
     EVENT_FINAL, EVENT_ERROR, EVENT_PLAN_PATCH, EVENT_TITLE, NODE_LABELS,
-    EVENT_TOOL_CALL, EVENT_TOOL_RESULT, TOOL_LABELS,
+    EVENT_TOOL_CALL, EVENT_TOOL_RESULT,
 )
 from app.services.message_history import (
     messages_with_xhs_sources,
@@ -17,6 +17,7 @@ from app.services.message_history import (
     render_xhs_sources,
 )
 from app.services.session_store import DEFAULT_TITLE, title_from_message
+from app.services.tool_labels import build_tool_label
 
 
 def _sse(event: str, payload: dict) -> dict:
@@ -42,6 +43,13 @@ def _as_text(content) -> str:
                 parts.append(block)
         return "".join(parts)
     return str(content) if content else ""
+
+
+def _tool_input(event: dict) -> dict:
+    """从 LangChain 事件中抽取工具入参，用于生成实时进度文案。"""
+    data = event.get("data") or {}
+    value = data.get("input") if isinstance(data, dict) else {}
+    return value if isinstance(value, dict) else {}
 
 
 async def sse_events(message: str, thread_id: str | None, request):
@@ -93,21 +101,24 @@ async def sse_events(message: str, thread_id: str | None, request):
                     answer_parts.append(text)
                     yield _sse(EVENT_TOKEN, {"text": text})
             elif kind == "on_tool_start":
+                label = build_tool_label(name, _tool_input(ev))
                 for step in tool_steps:
                     if step["status"] == "running":
                         step["status"] = "done"
                 tool_steps.append({
                     "tool": name,
-                    "label": TOOL_LABELS.get(name, name),
+                    "label": label,
                     "status": "running",
                 })
-                yield _sse(EVENT_TOOL_CALL, {"tool": name, "label": TOOL_LABELS.get(name, name)})
+                yield _sse(EVENT_TOOL_CALL, {"tool": name, "label": label})
             elif kind == "on_tool_end":
+                label = build_tool_label(name, _tool_input(ev))
                 for step in reversed(tool_steps):
                     if step["tool"] == name and step["status"] == "running":
                         step["status"] = "done"
+                        label = step["label"]
                         break
-                yield _sse(EVENT_TOOL_RESULT, {"tool": name, "label": TOOL_LABELS.get(name, name)})
+                yield _sse(EVENT_TOOL_RESULT, {"tool": name, "label": label})
             elif kind == "on_chain_start" and name in NODE_LABELS:
                 yield _sse(EVENT_NODE_START, {"node": name, "label": NODE_LABELS[name]})
             elif kind == "on_chain_end" and name in NODE_LABELS:

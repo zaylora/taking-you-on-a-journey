@@ -25,16 +25,3 @@ NODE_LABELS = {
     "agent": "正在思考...",
     "model": "正在思考...",
 }
-
-# 工具名 → 前端展示的友好中文文案（用于 tool_call / tool_result 过程链）
-TOOL_LABELS = {
-    "get_current_time": "获取当前时间",
-    "search_attractions": "搜索景点",
-    "search_restaurants": "搜索餐厅",
-    "get_weather": "查询天气",
-    "plan_route": "规划交通",
-    "assemble_itinerary": "编排逐日行程",
-    "assign_hotels": "安排住宿",
-    "compute_budget_tool": "核算预算",
-    "finalize_plan": "确认行程",
-}
