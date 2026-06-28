@@ -932,5 +932,6 @@ def test_extract_source_records_dedupes_and_limits():
             ]
         }
     }
-    records = xhs_tools._extract_source_records(search_result, limit=1)
-    assert [r["note_id"] for r in records] == ["n1"]
+    records = xhs_tools._extract_source_records(search_result, limit=10)
+    assert len(records) == 2
+    assert [r["note_id"] for r in records] == ["n1", "n2"]
