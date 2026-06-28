@@ -288,6 +288,41 @@ def _extract_note_targets(search_result: dict[str, Any], *, limit: int) -> list[
     return targets
 
 
+def _extract_source_records(search_result: dict[str, Any], *, limit: int) -> list[dict[str, Any]]:
+    """从搜索结果提取笔记级来源记录，按 note_id 去重。
+
+    笔记级 xsec_token 只在搜索结果 item 级出现（read 阶段拿到的是 user 级 token），
+    所以必须在搜索阶段采集 id + xsec_token + 标题。
+    """
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for record in _walk_values(search_result.get("data", search_result)):
+        if not isinstance(record, dict):
+            continue
+        note_id = _first_string(record, ("id", "note_id", "noteId", "noteIdStr"))
+        if not note_id or note_id in seen:
+            continue
+        # 排除明显的用户 id：item 同时带 model_type=note 或含 note_card 才算笔记
+        note_card = record.get("note_card")
+        if not isinstance(note_card, dict) and record.get("model_type") != "note":
+            continue
+        seen.add(note_id)
+        card = note_card if isinstance(note_card, dict) else {}
+        title = _first_string(card, ("display_title", "title"))
+        note_type = _first_string(card, ("type",))
+        xsec_token = _first_string(record, ("xsec_token", "xsecToken"))
+        records.append({
+            "note_id": note_id,
+            "xsec_token": xsec_token,
+            "title": title,
+            "type": note_type,
+            "url": _build_note_url(note_id, xsec_token),
+        })
+        if len(records) >= limit:
+            break
+    return records
+
+
 def _compact_json(value: Any, *, limit: int = _NOTE_TEXT_LIMIT) -> str:
     text = json.dumps(value, ensure_ascii=False, default=str)
     return text[:limit]

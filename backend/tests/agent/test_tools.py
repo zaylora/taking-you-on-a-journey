@@ -883,3 +883,54 @@ def test_build_note_url_without_token_degrades():
 
 def test_build_note_url_empty_id_returns_empty():
     assert xhs_tools._build_note_url("", "TOKEN") == ""
+
+
+def test_extract_source_records_from_search_items():
+    search_result = {
+        "ok": True,
+        "data": {
+            "items": [
+                {
+                    "id": "6867e6f80000000017034699",
+                    "xsec_token": "TOKEN_A",
+                    "note_card": {"display_title": "顺德一日游", "type": "normal"},
+                },
+                {
+                    "id": "68176d1e000000000303b562",
+                    "xsec_token": "TOKEN_B",
+                    "note_card": {"display_title": "", "type": "video"},
+                },
+            ]
+        },
+    }
+    records = xhs_tools._extract_source_records(search_result, limit=6)
+    assert records == [
+        {
+            "note_id": "6867e6f80000000017034699",
+            "xsec_token": "TOKEN_A",
+            "title": "顺德一日游",
+            "type": "normal",
+            "url": "https://www.xiaohongshu.com/explore/6867e6f80000000017034699?xsec_token=TOKEN_A&xsec_source=pc_search",
+        },
+        {
+            "note_id": "68176d1e000000000303b562",
+            "xsec_token": "TOKEN_B",
+            "title": "",
+            "type": "video",
+            "url": "https://www.xiaohongshu.com/explore/68176d1e000000000303b562?xsec_token=TOKEN_B&xsec_source=pc_search",
+        },
+    ]
+
+
+def test_extract_source_records_dedupes_and_limits():
+    search_result = {
+        "data": {
+            "items": [
+                {"id": "n1", "xsec_token": "t1", "note_card": {"display_title": "A", "type": "normal"}},
+                {"id": "n1", "xsec_token": "t1", "note_card": {"display_title": "A", "type": "normal"}},
+                {"id": "n2", "xsec_token": "t2", "note_card": {"display_title": "B", "type": "normal"}},
+            ]
+        }
+    }
+    records = xhs_tools._extract_source_records(search_result, limit=1)
+    assert [r["note_id"] for r in records] == ["n1"]
