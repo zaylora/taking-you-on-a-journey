@@ -3,7 +3,7 @@ from app.agent.state import TripState
 
 def test_tripstate_has_business_fields():
     ann = TripState.__annotations__
-    for field in ("day_plans", "changed_days", "plan_version", "budget_check", "retry_count", "summary"):
+    for field in ("day_plans", "changed_days", "plan_version", "budget_check", "retry_count", "summary", "xhs_sources"):
         assert field in ann, f"缺业务字段 {field}"
 
 

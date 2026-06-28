@@ -14,3 +14,4 @@ class TripState(AgentState):
     budget_check: dict
     retry_count: int
     summary: str
+    xhs_sources: list
