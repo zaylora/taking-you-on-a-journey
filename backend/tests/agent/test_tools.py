@@ -970,8 +970,10 @@ def test_extract_source_records_dedupes_and_limits():
 
 @pytest.mark.asyncio
 async def test_research_xhs_merges_with_existing_state_sources(monkeypatch):
+    """去重验证：state 已有 [note-0, note-1]，本轮搜索也返回 note-1，合并后只有 2 条。"""
     async def _fake_run(args):
         if args[0] == "search":
+            # note-1 与 state 已有来源重叠，用于验证去重
             return {"ok": True, "data": {"items": [
                 {"id": "note-1", "xsec_token": "tok1", "model_type": "note",
                  "note_card": {"display_title": "新攻略", "type": "normal"}},
@@ -984,6 +986,7 @@ async def test_research_xhs_merges_with_existing_state_sources(monkeypatch):
     monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
     monkeypatch.setattr(xhs_tools, "build_llm", make_fake_build_llm(structured=brief))
 
+    # state 里已有 [note-0, note-1]，其中 note-1 与本轮搜索结果重叠
     cmd = await tools.research_xhs_travel_guide.ainvoke({
         "type": "tool_call",
         "name": "research_xhs_travel_guide",
@@ -991,13 +994,49 @@ async def test_research_xhs_merges_with_existing_state_sources(monkeypatch):
         "args": {
             "city": "顺德", "days": 1, "max_notes": 1, "analyze_images": False,
             "state": {"xhs_sources": [
-                {"note_id": "note-0", "xsec_token": "t0", "title": "旧", "type": "normal",
+                {"note_id": "note-0", "xsec_token": "t0", "title": "旧note0", "type": "normal",
                  "url": "https://www.xiaohongshu.com/explore/note-0?xsec_token=t0&xsec_source=pc_search"},
+                {"note_id": "note-1", "xsec_token": "tok1", "title": "旧note1", "type": "normal",
+                 "url": "https://www.xiaohongshu.com/explore/note-1?xsec_token=tok1&xsec_source=pc_search"},
             ]},
         },
     })
 
     from langgraph.types import Command as _Command
     assert isinstance(cmd, _Command)
-    # 旧来源保留 + 新来源追加，按 note_id 去重
-    assert [s["note_id"] for s in cmd.update["xhs_sources"]] == ["note-0", "note-1"]
+    sources = cmd.update["xhs_sources"]
+    # 去重后只有 2 条，note-1 不能重复出现
+    assert [s["note_id"] for s in sources] == ["note-0", "note-1"]
+    # _merge_xhs_sources 先遍历 existing，重复时保留 existing 记录，新来源被丢弃
+    note1 = next(s for s in sources if s["note_id"] == "note-1")
+    assert note1["title"] == "旧note1"
+
+
+@pytest.mark.asyncio
+async def test_research_xhs_search_failure_returns_command_without_xhs_sources(monkeypatch):
+    """search 失败路径：返回 Command（不是 dict），且不写 xhs_sources，envelope ok=False。"""
+    async def _fake_run(args):
+        if args[0] == "search":
+            return {"ok": False, "error": {"code": "xhs_cli_failed", "message": "登录失效"}}
+        return {"ok": True, "data": {}}
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+    # 失败分支在采集 targets 之前 return，不调用 LLM，无需 mock build_llm
+
+    cmd = await tools.research_xhs_travel_guide.ainvoke({
+        "type": "tool_call",
+        "name": "research_xhs_travel_guide",
+        "id": "call_r_fail",
+        "args": {
+            "city": "顺德", "days": 1, "max_notes": 1, "analyze_images": False,
+            "state": {},
+        },
+    })
+
+    from langgraph.types import Command as _Command
+    assert isinstance(cmd, _Command)
+    # 失败时不写来源
+    assert "xhs_sources" not in cmd.update
+    # envelope 的 ok 是 False
+    envelope = json.loads(cmd.update["messages"][0].content)
+    assert envelope["ok"] is False
