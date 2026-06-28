@@ -9,7 +9,6 @@ from typing import Annotated, Any, Literal
 
 from langchain_core.messages import HumanMessage, SystemMessage, ToolMessage
 from langchain_core.tools import InjectedToolCallId, tool
-from langgraph.prebuilt import InjectedState
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
@@ -586,29 +585,9 @@ async def xhs_user_profile(user_id: str) -> dict[str, Any]:
     return await _run_xhs_json(["user", user_id])
 
 
-def _merge_xhs_sources(
-    existing: list[dict[str, Any]] | None,
-    new_records: list[dict[str, Any]],
-    *,
-    limit: int = _RESEARCH_NOTE_LIMIT,
-) -> list[dict[str, Any]]:
-    merged: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for record in [*(existing or []), *new_records]:
-        note_id = (record or {}).get("note_id", "")
-        if not note_id or note_id in seen:
-            continue
-        seen.add(note_id)
-        merged.append(record)
-        if len(merged) >= limit:
-            break
-    return merged
-
-
 def _research_command(
     tool_call_id: str,
     envelope: dict[str, Any],
-    state: dict[str, Any] | None,
     new_records: list[dict[str, Any]],
 ) -> Command:
     update: dict[str, Any] = {
@@ -617,10 +596,10 @@ def _research_command(
             tool_call_id=tool_call_id,
         )],
     }
+    # 只写本轮增量，合并/去重/截断交给 TripState.xhs_sources 的 reducer，
+    # 这样同一 step 多个 research tool 并行写入不会触发 LastValue 并发写冲突。
     if new_records:
-        update["xhs_sources"] = _merge_xhs_sources(
-            (state or {}).get("xhs_sources"), new_records,
-        )
+        update["xhs_sources"] = new_records
     return Command(update=update)
 
 
@@ -635,7 +614,6 @@ async def research_xhs_travel_guide(
     analyze_images: bool = True,
     max_images_per_note: int = 4,
     tool_call_id: Annotated[str, InjectedToolCallId] = "",
-    state: Annotated[dict, InjectedState] = None,
 ) -> Command:
     """研究小红书旅行攻略并提炼结构化参考。先用它学习攻略经验，再用高德工具校验 POI/天气/路线。
     采集到的笔记来源链接会写回 state，最终回复结尾会自动附上来源。"""
@@ -654,7 +632,7 @@ async def research_xhs_travel_guide(
         result = await _run_xhs_json(["search", keyword, "--sort", "popular", "--type", "all", "--page", "1"])
         searches.append({"keyword": keyword, "result": result})
         if result.get("ok") is False:
-            return _research_command(tool_call_id, result, state, [])
+            return _research_command(tool_call_id, result, [])
         for record in _extract_source_records(result, limit=max_notes):
             source_by_id.setdefault(record["note_id"], record)
         for target in _extract_note_targets(result, limit=max_notes):
@@ -732,4 +710,4 @@ async def research_xhs_travel_guide(
             "source_link_count": len(read_sources),
         },
     }
-    return _research_command(tool_call_id, envelope, state, read_sources)
+    return _research_command(tool_call_id, envelope, read_sources)

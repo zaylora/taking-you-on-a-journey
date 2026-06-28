@@ -55,7 +55,7 @@ def make_fake_build_llm(*, tokens=None, structured=None):
 
 @pytest.fixture
 def fake_amap(monkeypatch):
-    """把 app.tools.amap 的四个函数 patch 成可控异步返回。返回一个可配置 dict。"""
+    """把 app.utils.amap 的四个函数 patch 成可控异步返回。返回一个可配置 dict。"""
     import app.utils.amap as amap
 
     cfg = {

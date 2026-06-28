@@ -45,7 +45,7 @@ async def test_search_poi_logs_empty_diagnostics(monkeypatch, caplog):
         monkeypatch,
         payload={"status": "1", "infocode": "10000", "info": "OK", "count": "0", "pois": []},
     )
-    caplog.set_level("INFO", logger="app.tools.amap")
+    caplog.set_level("INFO", logger="app.utils.amap")
 
     assert await amap.search_poi("成都", "不存在的景点", "风景名胜") == []
 
