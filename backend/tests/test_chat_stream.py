@@ -16,3 +16,34 @@ def test_health(client):
 def test_chat_rejects_empty_message(client):
     resp = client.post("/api/chat", json={"message": ""})
     assert resp.status_code == 422
+
+
+from app.graph.stream import render_xhs_sources
+
+
+def test_render_xhs_sources_basic():
+    md = render_xhs_sources([
+        {"title": "顺德一日游", "url": "https://www.xiaohongshu.com/explore/n1?xsec_token=t1&xsec_source=pc_search"},
+        {"title": "", "url": "https://www.xiaohongshu.com/explore/n2"},
+    ])
+    assert md.startswith("\n\n## 笔记来源\n")
+    assert "- [顺德一日游](https://www.xiaohongshu.com/explore/n1?xsec_token=t1&xsec_source=pc_search)" in md
+    assert "- [小红书笔记](https://www.xiaohongshu.com/explore/n2)" in md
+
+
+def test_render_xhs_sources_empty_returns_blank():
+    assert render_xhs_sources([]) == ""
+
+
+def test_render_xhs_sources_skips_missing_url_and_limits():
+    md = render_xhs_sources(
+        [
+            {"title": "A", "url": "https://x/1"},
+            {"title": "B", "url": ""},
+            {"title": "C", "url": "https://x/3"},
+        ],
+        limit=1,
+    )
+    assert "[A](https://x/1)" in md
+    assert "B" not in md  # 无 url 跳过
+    assert "C" not in md  # 超过 limit

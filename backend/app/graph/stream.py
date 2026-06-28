@@ -39,6 +39,26 @@ def _as_text(content) -> str:
     return str(content) if content else ""
 
 
+_XHS_SOURCE_LIMIT = 6
+_XHS_SOURCE_FALLBACK_TITLE = "小红书笔记"
+
+
+def render_xhs_sources(sources: list[dict], *, limit: int = _XHS_SOURCE_LIMIT) -> str:
+    """把 xhs_sources 渲染成 markdown「## 笔记来源」列表。空或全无 url 时返回空串。"""
+    lines = []
+    for src in sources or []:
+        url = (src.get("url") or "").strip()
+        if not url:
+            continue
+        title = (src.get("title") or "").strip() or _XHS_SOURCE_FALLBACK_TITLE
+        lines.append(f"- [{title}]({url})")
+        if len(lines) >= limit:
+            break
+    if not lines:
+        return ""
+    return "\n\n## 笔记来源\n" + "\n".join(lines)
+
+
 async def sse_events(message: str, thread_id: str | None, request):
     graph = request.app.state.graph
     session_store = request.app.state.session_store
@@ -56,6 +76,9 @@ async def sse_events(message: str, thread_id: str | None, request):
         if new_session:
             yield _sse(EVENT_SESSION, {"thread_id": thread_id})
         stream_input = {"messages": [HumanMessage(content=message)]}
+
+        prior_state = await graph.aget_state(config)
+        prior_source_count = len((prior_state.values or {}).get("xhs_sources", []) or [])
 
         async for ev in graph.astream_events(stream_input, config=config, version="v2"):
             if await request.is_disconnected():
@@ -85,6 +108,12 @@ async def sse_events(message: str, thread_id: str | None, request):
             if msg_type == "ai" and content:
                 answer = _as_text(content)
                 break
+        xhs_sources = values.get("xhs_sources", []) or []
+        if answer and len(xhs_sources) > prior_source_count:
+            sources_md = render_xhs_sources(xhs_sources)
+            if sources_md:
+                yield _sse(EVENT_TOKEN, {"text": sources_md})
+                answer = answer + sources_md
         day_plans = values.get("day_plans", [])
         budget = values.get("budget_check", {})
         plan_version = values.get("plan_version", 0) or 0
