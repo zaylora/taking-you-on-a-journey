@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import json
 from pathlib import Path
 import uuid
 
@@ -39,6 +40,26 @@ class SessionStore:
                   updated_at TEXT NOT NULL,
                   deleted_at TEXT
                 )
+                """
+            )
+            await db.execute(
+                """
+                CREATE TABLE IF NOT EXISTS session_messages (
+                  id INTEGER PRIMARY KEY AUTOINCREMENT,
+                  thread_id TEXT NOT NULL,
+                  role TEXT NOT NULL,
+                  content TEXT NOT NULL,
+                  kind TEXT NOT NULL DEFAULT 'text',
+                  tool_steps TEXT NOT NULL DEFAULT '[]',
+                  created_at TEXT NOT NULL,
+                  FOREIGN KEY(thread_id) REFERENCES session_meta(thread_id)
+                )
+                """
+            )
+            await db.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_session_messages_thread_id_id
+                ON session_messages(thread_id, id)
                 """
             )
             await db.commit()
@@ -125,3 +146,56 @@ class SessionStore:
             )
             await db.commit()
             return cursor.rowcount > 0
+
+    async def append_ui_message(
+        self,
+        thread_id: str,
+        role: str,
+        content: str,
+        *,
+        kind: str = "text",
+        tool_steps: list[dict] | None = None,
+    ) -> None:
+        now = _now_iso()
+        async with aiosqlite.connect(self.db_path) as db:
+            await db.execute(
+                """
+                INSERT INTO session_messages (thread_id, role, content, kind, tool_steps, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    thread_id,
+                    role,
+                    content,
+                    kind,
+                    json.dumps(tool_steps or [], ensure_ascii=False),
+                    now,
+                ),
+            )
+            await db.commit()
+
+    async def list_ui_messages(self, thread_id: str) -> list[dict]:
+        async with aiosqlite.connect(self.db_path) as db:
+            db.row_factory = aiosqlite.Row
+            rows = await db.execute_fetchall(
+                """
+                SELECT role, content, kind, tool_steps
+                FROM session_messages
+                WHERE thread_id = ?
+                ORDER BY id ASC
+                """,
+                (thread_id,),
+            )
+        messages = []
+        for row in rows:
+            try:
+                tool_steps = json.loads(row["tool_steps"] or "[]")
+            except json.JSONDecodeError:
+                tool_steps = []
+            messages.append({
+                "role": row["role"],
+                "content": row["content"],
+                "kind": row["kind"],
+                "tool_steps": tool_steps,
+            })
+        return messages

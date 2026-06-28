@@ -11,6 +11,11 @@ from app.core.constants import (
     EVENT_FINAL, EVENT_ERROR, EVENT_PLAN_PATCH, EVENT_TITLE, NODE_LABELS,
     EVENT_TOOL_CALL, EVENT_TOOL_RESULT, TOOL_LABELS,
 )
+from app.services.message_history import (
+    messages_with_xhs_sources,
+    reconstruct_messages_from_graph_history,
+    render_xhs_sources,
+)
 from app.services.session_store import DEFAULT_TITLE, title_from_message
 
 
@@ -39,26 +44,6 @@ def _as_text(content) -> str:
     return str(content) if content else ""
 
 
-_XHS_SOURCE_LIMIT = 6
-_XHS_SOURCE_FALLBACK_TITLE = "小红书笔记"
-
-
-def render_xhs_sources(sources: list[dict], *, limit: int = _XHS_SOURCE_LIMIT) -> str:
-    """把 xhs_sources 渲染成 markdown「## 笔记来源」列表。空或全无 url 时返回空串。"""
-    lines = []
-    for src in sources or []:
-        url = (src.get("url") or "").strip()
-        if not url:
-            continue
-        title = (src.get("title") or "").strip() or _XHS_SOURCE_FALLBACK_TITLE
-        lines.append(f"- [{title}]({url})")
-        if len(lines) >= limit:
-            break
-    if not lines:
-        return ""
-    return "\n\n## 笔记来源\n" + "\n".join(lines)
-
-
 async def sse_events(message: str, thread_id: str | None, request):
     graph = request.app.state.graph
     session_store = request.app.state.session_store
@@ -76,9 +61,26 @@ async def sse_events(message: str, thread_id: str | None, request):
         if new_session:
             yield _sse(EVENT_SESSION, {"thread_id": thread_id})
         stream_input = {"messages": [HumanMessage(content=message)]}
+        answer_parts: list[str] = []
+        tool_steps: list[dict] = []
 
         prior_state = await graph.aget_state(config)
-        prior_source_count = len((prior_state.values or {}).get("xhs_sources", []) or [])
+        prior_values = prior_state.values or {}
+        prior_sources = prior_values.get("xhs_sources", []) or []
+        prior_source_count = len(prior_sources)
+        if not await session_store.list_ui_messages(thread_id):
+            prior_messages = messages_with_xhs_sources(
+                await reconstruct_messages_from_graph_history(graph, config, prior_values),
+                prior_sources,
+            )
+            for prior_message in prior_messages:
+                await session_store.append_ui_message(
+                    thread_id,
+                    prior_message.get("role", "assistant"),
+                    prior_message.get("content", ""),
+                    kind=prior_message.get("kind", "text"),
+                    tool_steps=prior_message.get("tool_steps", []),
+                )
 
         async for ev in graph.astream_events(stream_input, config=config, version="v2"):
             if await request.is_disconnected():
@@ -88,10 +90,23 @@ async def sse_events(message: str, thread_id: str | None, request):
                 chunk = ev["data"]["chunk"]
                 text = _as_text(chunk.content)
                 if text:
+                    answer_parts.append(text)
                     yield _sse(EVENT_TOKEN, {"text": text})
             elif kind == "on_tool_start":
+                for step in tool_steps:
+                    if step["status"] == "running":
+                        step["status"] = "done"
+                tool_steps.append({
+                    "tool": name,
+                    "label": TOOL_LABELS.get(name, name),
+                    "status": "running",
+                })
                 yield _sse(EVENT_TOOL_CALL, {"tool": name, "label": TOOL_LABELS.get(name, name)})
             elif kind == "on_tool_end":
+                for step in reversed(tool_steps):
+                    if step["tool"] == name and step["status"] == "running":
+                        step["status"] = "done"
+                        break
                 yield _sse(EVENT_TOOL_RESULT, {"tool": name, "label": TOOL_LABELS.get(name, name)})
             elif kind == "on_chain_start" and name in NODE_LABELS:
                 yield _sse(EVENT_NODE_START, {"node": name, "label": NODE_LABELS[name]})
@@ -113,7 +128,12 @@ async def sse_events(message: str, thread_id: str | None, request):
             sources_md = render_xhs_sources(xhs_sources)
             if sources_md:
                 yield _sse(EVENT_TOKEN, {"text": sources_md})
+                answer_parts.append(sources_md)
                 answer = answer + sources_md
+        for step in tool_steps:
+            if step["status"] == "running":
+                step["status"] = "done"
+        ui_answer = "".join(answer_parts) or answer
         day_plans = values.get("day_plans", [])
         budget = values.get("budget_check", {})
         plan_version = values.get("plan_version", 0) or 0
@@ -124,6 +144,14 @@ async def sse_events(message: str, thread_id: str | None, request):
         if session and session.get("title") == DEFAULT_TITLE:
             title = title_from_message(message)
         updated = await session_store.touch_session(thread_id, title=title)
+        await session_store.append_ui_message(thread_id, "user", message)
+        if ui_answer or tool_steps:
+            await session_store.append_ui_message(
+                thread_id,
+                "assistant",
+                ui_answer,
+                tool_steps=tool_steps,
+            )
         yield _sse(EVENT_FINAL, {
             "answer": answer,
             "day_plans": day_plans,
@@ -134,4 +162,14 @@ async def sse_events(message: str, thread_id: str | None, request):
             yield _sse(EVENT_TITLE, {"thread_id": thread_id, "title": updated["title"]})
     except Exception:  # noqa: BLE001 —— 前端脱敏：不泄露 Key/堆栈；但服务端必须留真因
         logger.exception("sse_events 处理失败 thread_id=%s", thread_id)
-        yield _sse(EVENT_ERROR, {"message": "生成失败，请重试"})
+        error_message = "生成失败，请重试"
+        existing_ui_messages = await session_store.list_ui_messages(thread_id)
+        last_is_current_user = (
+            bool(existing_ui_messages)
+            and existing_ui_messages[-1].get("role") == "user"
+            and existing_ui_messages[-1].get("content") == message
+        )
+        if not last_is_current_user:
+            await session_store.append_ui_message(thread_id, "user", message)
+        await session_store.append_ui_message(thread_id, "assistant", error_message, kind="error")
+        yield _sse(EVENT_ERROR, {"message": error_message})

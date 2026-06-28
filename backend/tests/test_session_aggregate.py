@@ -7,6 +7,8 @@
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, SystemMessage
 
 from app.api.sessions import _aggregate_messages
+from app.api.sessions import _messages_with_xhs_sources
+from app.services.message_history import reconstruct_messages_from_history
 
 
 def _ai_with_tool_calls(content, tools):
@@ -85,3 +87,101 @@ def test_summarization_human_message_skipped():
 
     assert [m["role"] for m in result] == ["user", "assistant"]
     assert result[0]["content"] == "有没有推荐吃的店铺呢？广州和顺德"
+
+
+def test_messages_with_xhs_sources_appends_to_latest_assistant_once():
+    messages = [
+        {"role": "user", "content": "帮我做顺德攻略", "kind": "text"},
+        {
+            "role": "assistant",
+            "content": "这是顺德攻略。",
+            "kind": "text",
+            "tool_steps": [{"tool": "research_xhs_travel_guide", "label": "研究小红书攻略", "status": "done"}],
+        },
+    ]
+    sources = [{"title": "顺德一日游", "url": "https://www.xiaohongshu.com/explore/note-1"}]
+
+    result = _messages_with_xhs_sources(messages, sources)
+
+    assert result[0]["role"] == "user"
+    assert result[1]["content"] == (
+        "这是顺德攻略。\n\n## 笔记来源\n"
+        "- [顺德一日游](https://www.xiaohongshu.com/explore/note-1)"
+    )
+    assert result[1]["tool_steps"] == messages[1]["tool_steps"]
+    assert messages[1]["content"] == "这是顺德攻略。"
+
+
+def test_messages_with_xhs_sources_does_not_duplicate_existing_sources():
+    messages = [
+        {"role": "assistant", "content": "已有正文。\n\n## 笔记来源\n- [A](https://x/1)", "kind": "text"},
+    ]
+
+    result = _messages_with_xhs_sources(messages, [{"title": "B", "url": "https://x/2"}])
+
+    assert result[0]["content"] == "已有正文。\n\n## 笔记来源\n- [A](https://x/1)"
+
+
+def test_reconstruct_messages_from_history_merges_user_final_content_and_full_tools():
+    history_values = [
+        {
+            "messages": [
+                AIMessage(
+                    content="最终完整攻略。",
+                    tool_calls=[{"name": "finalize_plan", "args": {}, "id": "latest"}],
+                )
+            ]
+        },
+        {
+            "messages": [
+                HumanMessage(content="帮我做广州两天旅行攻略"),
+                _ai_with_tool_calls("", ["search_attractions", "search_restaurants", "get_weather"]),
+                ToolMessage(content="工具结果", tool_call_id="call_0"),
+                _ai_with_tool_calls("", ["plan_route", "assemble_itinerary", "finalize_plan"]),
+            ]
+        },
+        {"messages": [HumanMessage(content="帮我做广州两天旅行攻略")]},
+    ]
+
+    result = reconstruct_messages_from_history(history_values)
+
+    assert [m["role"] for m in result] == ["user", "assistant"]
+    assert result[0]["content"] == "帮我做广州两天旅行攻略"
+    assert result[1]["content"] == "最终完整攻略。"
+    assert [step["tool"] for step in result[1]["tool_steps"]] == [
+        "search_attractions",
+        "search_restaurants",
+        "get_weather",
+        "plan_route",
+        "assemble_itinerary",
+        "finalize_plan",
+    ]
+
+
+def test_reconstruct_messages_from_history_keeps_repeated_tool_calls():
+    history_values = [
+        {"messages": [AIMessage(content="最终答案。", tool_calls=[
+            {"name": "finalize_plan", "args": {}, "id": "final"}
+        ])]},
+        {
+            "messages": [
+                HumanMessage(content="做攻略"),
+                AIMessage(content="", tool_calls=[
+                    {"name": "search_attractions", "args": {}, "id": "a1"},
+                    {"name": "search_attractions", "args": {}, "id": "a2"},
+                    {"name": "search_restaurants", "args": {}, "id": "r1"},
+                    {"name": "search_restaurants", "args": {}, "id": "r2"},
+                ]),
+            ]
+        },
+    ]
+
+    result = reconstruct_messages_from_history(history_values)
+
+    assert [step["tool"] for step in result[1]["tool_steps"]] == [
+        "search_attractions",
+        "search_attractions",
+        "search_restaurants",
+        "search_restaurants",
+        "finalize_plan",
+    ]

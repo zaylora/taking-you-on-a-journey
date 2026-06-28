@@ -1,8 +1,13 @@
 """M5 anonymous conversation session endpoints."""
 from fastapi import APIRouter, HTTPException, Request, Response
-from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage, ToolMessage
 
-from app.core.constants import TOOL_LABELS
+from app.services.message_history import (
+    aggregate_messages,
+    extract_content,
+    messages_with_xhs_sources,
+    reconstruct_messages_from_graph_history,
+    tool_steps,
+)
 
 router = APIRouter()
 
@@ -12,25 +17,7 @@ def _config(thread_id: str) -> dict:
 
 
 def _extract_content(message) -> str:
-    """Extract text content from a message, handling list-type content."""
-    content = getattr(message, "content", None)
-    if isinstance(content, str):
-        return content
-    if isinstance(content, list):
-        # Multi-modal or tool-use messages: join text parts
-        parts = []
-        for part in content:
-            if isinstance(part, str):
-                parts.append(part)
-            elif isinstance(part, dict) and part.get("type") == "text":
-                parts.append(part.get("text", ""))
-        return "\n".join(parts)
-    if content is not None:
-        return str(content)
-    return ""
-
-
-_SKIP_TYPES = (ToolMessage, SystemMessage)
+    return extract_content(message)
 
 
 def _is_summarization_message(message) -> bool:
@@ -38,10 +25,7 @@ def _is_summarization_message(message) -> bool:
 
 
 def _tool_steps(message) -> list[dict]:
-    return [
-        {"tool": tc["name"], "label": TOOL_LABELS.get(tc["name"], tc["name"]), "status": "done"}
-        for tc in (getattr(message, "tool_calls", None) or [])
-    ]
+    return tool_steps(message)
 
 
 def _aggregate_messages(messages) -> list[dict]:
@@ -53,57 +37,32 @@ def _aggregate_messages(messages) -> list[dict]:
     这里把相邻 AIMessage 折叠：工具步骤按顺序累积，正文拼接非空片段。
     遇到 HumanMessage 即收尾当前 assistant 消息，开启新一轮。
     """
-    result: list[dict] = []
-    current_ai: dict | None = None
-    for message in messages:
-        if isinstance(message, _SKIP_TYPES):
-            continue
-        if isinstance(message, HumanMessage):
-            if _is_summarization_message(message):
-                continue
-            current_ai = None
-            result.append({"role": "user", "content": _extract_content(message), "kind": "text"})
-        elif isinstance(message, AIMessage):
-            content = _extract_content(message)
-            if current_ai is None:
-                current_ai = {
-                    "role": "assistant",
-                    "content": content,
-                    "kind": "text",
-                    "tool_steps": _tool_steps(message),
-                }
-                result.append(current_ai)
-            else:
-                current_ai["tool_steps"].extend(_tool_steps(message))
-                if content:
-                    current_ai["content"] = (
-                        f"{current_ai['content']}{content}" if current_ai["content"] else content
-                    )
-        elif isinstance(message, BaseMessage):
-            current_ai = None
-            result.append({"role": message.type, "content": _extract_content(message), "kind": "text"})
-        elif isinstance(message, dict):
-            current_ai = None
-            raw = message.get("content", "")
-            content = raw if isinstance(raw, str) else _extract_content(raw)
-            result.append({
-                "role": message.get("role", "assistant"),
-                "content": content,
-                "kind": message.get("kind", "text"),
-            })
-        else:
-            current_ai = None
-            result.append({"role": "assistant", "content": str(message), "kind": "text"})
-    return result
+    return aggregate_messages(messages)
+
+
+def _messages_with_xhs_sources(messages: list[dict], sources: list[dict]) -> list[dict]:
+    """Append rendered xhs source links to the latest assistant message for history replay.
+
+    During realtime streaming, stream.py sends these links as extra token text. LangGraph
+    stores only the model AIMessage, so history snapshots need the same deterministic
+    post-processing when replaying older graph-only sessions.
+    """
+    return messages_with_xhs_sources(messages, sources)
 
 
 async def _snapshot(request: Request, meta: dict) -> dict:
     graph = request.app.state.graph
     snap = await graph.aget_state(_config(meta["thread_id"]))
     values = snap.values or {}
+    ui_messages = await request.app.state.session_store.list_ui_messages(meta["thread_id"])
+    messages = ui_messages or await reconstruct_messages_from_graph_history(
+        graph,
+        _config(meta["thread_id"]),
+        values,
+    )
     return {
         **meta,
-        "messages": _aggregate_messages(values.get("messages", [])),
+        "messages": _messages_with_xhs_sources(messages, values.get("xhs_sources", []) or []),
         "day_plans": values.get("day_plans", []) or [],
         "budget": values.get("budget_check", {}) or {},
         "plan_version": values.get("plan_version", 0) or 0,
