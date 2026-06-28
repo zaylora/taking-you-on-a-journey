@@ -347,7 +347,12 @@ async def test_research_xhs_travel_guide_extracts_structured_brief(monkeypatch):
     async def _fake_run(args):
         calls.append(args)
         if args[0] == "search":
-            return {"ok": True, "data": {"items": [{"note_id": "note-1"}, {"note_id": "note-2"}]}}
+            return {"ok": True, "data": {"items": [
+                {"id": "note-1", "xsec_token": "tok1", "model_type": "note",
+                 "note_card": {"display_title": "顺德攻略一", "type": "normal"}},
+                {"id": "note-2", "xsec_token": "tok2", "model_type": "note",
+                 "note_card": {"display_title": "顺德攻略二", "type": "video"}},
+            ]}}
         if args[0] == "read":
             return {"ok": True, "data": {"title": f"{args[1]} 攻略", "desc": "09:00 去清晖园，人少好拍"}}
         if args[0] == "comments":
@@ -383,21 +388,34 @@ async def test_research_xhs_travel_guide_extracts_structured_brief(monkeypatch):
     monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
     monkeypatch.setattr(xhs_tools, "build_llm", make_fake_build_llm(structured=brief))
 
-    out = await tools.research_xhs_travel_guide.ainvoke({
-        "city": "顺德",
-        "days": 1,
-        "travel_style": "美食慢游",
-        "keywords": ["避雷"],
-        "max_notes": 2,
-        "include_comments": True,
-        "analyze_images": False,
+    cmd = await tools.research_xhs_travel_guide.ainvoke({
+        "type": "tool_call",
+        "name": "research_xhs_travel_guide",
+        "id": "call_r",
+        "args": {
+            "city": "顺德",
+            "days": 1,
+            "travel_style": "美食慢游",
+            "keywords": ["避雷"],
+            "max_notes": 2,
+            "include_comments": True,
+            "analyze_images": False,
+            "state": {},
+        },
     })
 
+    from langgraph.types import Command as _Command
+    assert isinstance(cmd, _Command)
+    out = json.loads(cmd.update["messages"][0].content)
     assert out["ok"] is True
     assert out["data"]["recommended_places"][0]["name"] == "清晖园"
     assert out["data"]["time_suggestions"][0]["time"] == "09:00"
     assert out["data"]["amap_query_hints"] == ["清晖园", "华盖路步行街", "双皮奶"]
     assert out["meta"]["source_note_count"] == 2
+    # 来源写回 state：两篇被读取的笔记
+    assert [s["note_id"] for s in cmd.update["xhs_sources"]] == ["note-1", "note-2"]
+    assert cmd.update["xhs_sources"][0]["url"].startswith(
+        "https://www.xiaohongshu.com/explore/note-1?xsec_token=tok1")
     assert calls == [
         ["search", "顺德旅游攻略", "--sort", "popular", "--type", "all", "--page", "1"],
         ["read", "note-1"],
@@ -415,7 +433,10 @@ async def test_research_xhs_travel_guide_includes_image_analysis_in_brief_payloa
     async def _fake_run(args):
         run_calls.append(args)
         if args[0] == "search":
-            return {"ok": True, "data": {"items": [{"note_id": "note-1"}]}}
+            return {"ok": True, "data": {"items": [
+                {"id": "note-1", "xsec_token": "tok1", "model_type": "note",
+                 "note_card": {"display_title": "顺德旅游攻略", "type": "normal"}},
+            ]}}
         if args[0] == "read":
             return {
                 "ok": True,
@@ -465,22 +486,32 @@ async def test_research_xhs_travel_guide_includes_image_analysis_in_brief_payloa
     monkeypatch.setattr(xhs_tools, "_analyze_xhs_note_images", _fake_analyze)
     monkeypatch.setattr(xhs_tools, "build_llm", lambda *_a, **_k: _CaptureLLM())
 
-    out = await tools.research_xhs_travel_guide.ainvoke({
-        "city": "顺德",
-        "days": 1,
-        "travel_style": "",
-        "keywords": [],
-        "max_notes": 1,
-        "include_comments": False,
-        "analyze_images": True,
-        "max_images_per_note": 1,
+    cmd = await tools.research_xhs_travel_guide.ainvoke({
+        "type": "tool_call",
+        "name": "research_xhs_travel_guide",
+        "id": "call_r2",
+        "args": {
+            "city": "顺德",
+            "days": 1,
+            "travel_style": "",
+            "keywords": [],
+            "max_notes": 1,
+            "include_comments": False,
+            "analyze_images": True,
+            "max_images_per_note": 1,
+            "state": {},
+        },
     })
 
+    from langgraph.types import Command as _Command
+    assert isinstance(cmd, _Command)
+    out = json.loads(cmd.update["messages"][0].content)
     payload = json.loads(llm_calls[0][1].content)
     assert payload["notes"][0]["image_analysis"]["places"] == ["清晖园"]
     assert payload["notes"][0]["image_analysis"]["foods"] == ["双皮奶"]
     assert out["data"]["visual_clues"] == ["图片文字显示清晖园 09:00"]
     assert out["meta"]["image_analysis_count"] == 1
+    assert [s["note_id"] for s in cmd.update["xhs_sources"]] == ["note-1"]
     assert run_calls[0] == ["search", "顺德旅游攻略", "--sort", "popular", "--type", "all", "--page", "1"]
 
 
@@ -935,3 +966,38 @@ def test_extract_source_records_dedupes_and_limits():
     records = xhs_tools._extract_source_records(search_result, limit=10)
     assert len(records) == 2
     assert [r["note_id"] for r in records] == ["n1", "n2"]
+
+
+@pytest.mark.asyncio
+async def test_research_xhs_merges_with_existing_state_sources(monkeypatch):
+    async def _fake_run(args):
+        if args[0] == "search":
+            return {"ok": True, "data": {"items": [
+                {"id": "note-1", "xsec_token": "tok1", "model_type": "note",
+                 "note_card": {"display_title": "新攻略", "type": "normal"}},
+            ]}}
+        if args[0] == "read":
+            return {"ok": True, "data": {"title": "新攻略", "desc": "正文"}}
+        return {"ok": True, "data": {}}
+
+    brief = xhs_tools.XhsTravelBrief(city="顺德", summary="略")
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+    monkeypatch.setattr(xhs_tools, "build_llm", make_fake_build_llm(structured=brief))
+
+    cmd = await tools.research_xhs_travel_guide.ainvoke({
+        "type": "tool_call",
+        "name": "research_xhs_travel_guide",
+        "id": "call_r3",
+        "args": {
+            "city": "顺德", "days": 1, "max_notes": 1, "analyze_images": False,
+            "state": {"xhs_sources": [
+                {"note_id": "note-0", "xsec_token": "t0", "title": "旧", "type": "normal",
+                 "url": "https://www.xiaohongshu.com/explore/note-0?xsec_token=t0&xsec_source=pc_search"},
+            ]},
+        },
+    })
+
+    from langgraph.types import Command as _Command
+    assert isinstance(cmd, _Command)
+    # 旧来源保留 + 新来源追加，按 note_id 去重
+    assert [s["note_id"] for s in cmd.update["xhs_sources"]] == ["note-0", "note-1"]
