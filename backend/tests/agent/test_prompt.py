@@ -31,6 +31,13 @@ def test_prompt_requires_retrieval_for_recommendable_places():
     assert "已有足够新的检索结果" in p
 
 
+def test_prompt_prefers_xhs_guide_style_keywords():
+    p = TRIP_AGENT_SYS
+
+    for kw in ("攻略型描述", "顺德旅游攻略", "东京亲子游攻略", "避免只搜宽泛词"):
+        assert kw in p
+
+
 def test_prompt_uses_structured_sections_for_agent_policy():
     p = TRIP_AGENT_SYS
 
@@ -80,6 +87,13 @@ def test_runtime_prompts_are_colocated_in_prompt_module():
     assert "行程文案润色助手" in ITINERARY_SYS
     assert "住宿规划助手" in ACCOMMODATION_SYS
     assert "当前时间上下文" in CURRENT_TIME_CONTEXT_TEMPLATE
+
+
+def test_xhs_research_prompt_mentions_image_text_analysis():
+    p = XHS_RESEARCH_SYS
+
+    for kw in ("图片解析结果", "店名", "菜单", "营业时间", "待校验线索", "不确定性"):
+        assert kw in p
 
 
 def test_prompt_does_not_duplicate_registered_tool_catalog():

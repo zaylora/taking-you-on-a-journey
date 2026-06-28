@@ -161,6 +161,92 @@ def test_xhs_extract_note_targets_from_nested_search_result():
     ]
 
 
+def test_xhs_guide_keywords_are_strategy_oriented():
+    out = xhs_tools._build_xhs_guide_keywords(
+        city="顺德",
+        days=1,
+        travel_style="美食慢游",
+        keywords=["避雷", "雨天", "双皮奶"],
+    )
+
+    assert out == [
+        "顺德旅游攻略",
+        "顺德1日游攻略",
+        "顺德美食攻略",
+        "顺德美食慢游攻略",
+        "顺德避雷攻略",
+        "顺德雨天攻略",
+    ]
+    assert all("攻略" in keyword for keyword in out)
+
+
+def test_extract_xhs_image_urls_prefers_note_images_and_dedupes():
+    note = {
+        "ok": True,
+        "data": {
+            "items": [{
+                "note_card": {
+                    "image_list": [
+                        {"url_default": "https://sns-img-qc.xhscdn.com/a.jpg"},
+                        {"url_pre": "https://sns-img-qc.xhscdn.com/b.webp?x=1"},
+                        {"url": "https://sns-img-qc.xhscdn.com/a.jpg"},
+                    ],
+                    "cover": "https://sns-img-qc.xhscdn.com/cover.jpg",
+                    "user": {"avatar": "https://sns-avatar-qc.xhscdn.com/avatar.jpg"},
+                }
+            }]
+        },
+    }
+
+    assert xhs_tools._extract_xhs_image_urls(note, limit=4) == [
+        "https://sns-img-qc.xhscdn.com/a.jpg",
+        "https://sns-img-qc.xhscdn.com/b.webp?x=1",
+        "https://sns-img-qc.xhscdn.com/cover.jpg",
+    ]
+
+
+def test_build_xhs_image_messages_uses_multimodal_blocks():
+    messages = xhs_tools._build_xhs_image_messages(
+        target="note-1",
+        note={"ok": True, "data": {"title": "顺德攻略"}},
+        image_urls=["https://sns-img-qc.xhscdn.com/a.jpg"],
+    )
+
+    assert len(messages) == 2
+    assert "图文解析" in messages[0].content
+    assert messages[1].content[0]["type"] == "text"
+    assert messages[1].content[1] == {
+        "type": "image_url",
+        "image_url": {"url": "https://sns-img-qc.xhscdn.com/a.jpg"},
+    }
+
+
+@pytest.mark.asyncio
+async def test_xhs_search_notes_normalizes_travel_keyword_to_guide_query(monkeypatch):
+    calls = []
+
+    async def _fake_run(args):
+        calls.append(args)
+        return {"ok": True, "data": {"items": []}}
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+
+    out = await tools.xhs_search_notes.ainvoke({
+        "keyword": "东京亲子游",
+        "sort": "popular",
+        "note_type": "image",
+        "page": 1,
+    })
+
+    assert out["ok"] is True
+    assert calls == [[
+        "search", "东京亲子游攻略",
+        "--sort", "popular",
+        "--type", "image",
+        "--page", "1",
+    ]]
+
+
 @pytest.mark.asyncio
 async def test_xhs_search_notes_builds_safe_cli_args(monkeypatch):
     calls = []
@@ -180,7 +266,7 @@ async def test_xhs_search_notes_builds_safe_cli_args(monkeypatch):
 
     assert out["ok"] is True
     assert calls == [[
-        "search", "顺德美食",
+        "search", "顺德美食攻略",
         "--sort", "popular",
         "--type", "image",
         "--page", "2",
@@ -200,6 +286,58 @@ async def test_xhs_note_comments_can_request_all_comments(monkeypatch):
     await tools.xhs_note_comments.ainvoke({"target": "note-1", "include_all": True})
 
     assert calls == [["comments", "note-1", "--all"]]
+
+
+@pytest.mark.asyncio
+async def test_xhs_read_note_adds_image_analysis_without_changing_envelope(monkeypatch):
+    calls = []
+
+    async def _fake_run(args):
+        calls.append(args)
+        return {
+            "ok": True,
+            "data": {
+                "items": [{
+                    "note_card": {
+                        "title": "顺德攻略",
+                        "image_list": [{"url_default": "https://sns-img-qc.xhscdn.com/a.jpg"}],
+                    }
+                }]
+            },
+        }
+
+    async def _fake_analyze(target, note, *, max_images):
+        assert target == "note-1"
+        assert max_images == 2
+        assert note["ok"] is True
+        return {
+            "target": target,
+            "image_count": 1,
+            "visible_text": ["清晖园 09:00"],
+            "places": ["清晖园"],
+            "foods": [],
+            "route_or_time_clues": ["09:00 人少"],
+            "tips": [],
+            "confidence": "high",
+            "warnings": [],
+            "image_urls": ["https://sns-img-qc.xhscdn.com/a.jpg"],
+        }
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+    monkeypatch.setattr(xhs_tools, "_analyze_xhs_note_images", _fake_analyze)
+
+    out = await tools.xhs_read_note.ainvoke({
+        "target": "note-1",
+        "analyze_images": True,
+        "max_images": 2,
+    })
+
+    assert out["ok"] is True
+    assert out["data"]["items"][0]["note_card"]["title"] == "顺德攻略"
+    assert out["image_analysis"]["places"] == ["清晖园"]
+    assert out["meta"]["image_analysis"]["attempted"] is True
+    assert out["meta"]["image_analysis"]["image_count"] == 1
+    assert calls == [["read", "note-1"]]
 
 
 @pytest.mark.asyncio
@@ -252,6 +390,7 @@ async def test_research_xhs_travel_guide_extracts_structured_brief(monkeypatch):
         "keywords": ["避雷"],
         "max_notes": 2,
         "include_comments": True,
+        "analyze_images": False,
     })
 
     assert out["ok"] is True
@@ -266,6 +405,83 @@ async def test_research_xhs_travel_guide_extracts_structured_brief(monkeypatch):
         ["read", "note-2"],
         ["comments", "note-2"],
     ]
+
+
+@pytest.mark.asyncio
+async def test_research_xhs_travel_guide_includes_image_analysis_in_brief_payload(monkeypatch):
+    run_calls = []
+    llm_calls = []
+
+    async def _fake_run(args):
+        run_calls.append(args)
+        if args[0] == "search":
+            return {"ok": True, "data": {"items": [{"note_id": "note-1"}]}}
+        if args[0] == "read":
+            return {
+                "ok": True,
+                "data": {
+                    "items": [{
+                        "note_card": {
+                            "title": "顺德旅游攻略",
+                            "desc": "正文提到清晖园。",
+                            "image_list": [{"url_default": "https://sns-img-qc.xhscdn.com/a.jpg"}],
+                        }
+                    }]
+                },
+            }
+        return {"ok": True, "data": {}}
+
+    async def _fake_analyze(target, note, *, max_images):
+        return {
+            "target": target,
+            "image_count": 1,
+            "visible_text": ["清晖园 09:00"],
+            "places": ["清晖园"],
+            "foods": ["双皮奶"],
+            "route_or_time_clues": ["上午人少"],
+            "tips": ["图片信息待地图校验"],
+            "confidence": "high",
+            "warnings": [],
+            "image_urls": ["https://sns-img-qc.xhscdn.com/a.jpg"],
+        }
+
+    brief = xhs_tools.XhsTravelBrief(
+        city="顺德",
+        summary="图片和正文都支持上午去清晖园。",
+        visual_clues=["图片文字显示清晖园 09:00"],
+        amap_query_hints=["清晖园", "双皮奶"],
+    )
+
+    class _CaptureRunnable:
+        async def ainvoke(self, messages, **_kwargs):
+            llm_calls.append(messages)
+            return brief
+
+    class _CaptureLLM:
+        def with_structured_output(self, *_args, **_kwargs):
+            return _CaptureRunnable()
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+    monkeypatch.setattr(xhs_tools, "_analyze_xhs_note_images", _fake_analyze)
+    monkeypatch.setattr(xhs_tools, "build_llm", lambda *_a, **_k: _CaptureLLM())
+
+    out = await tools.research_xhs_travel_guide.ainvoke({
+        "city": "顺德",
+        "days": 1,
+        "travel_style": "",
+        "keywords": [],
+        "max_notes": 1,
+        "include_comments": False,
+        "analyze_images": True,
+        "max_images_per_note": 1,
+    })
+
+    payload = json.loads(llm_calls[0][1].content)
+    assert payload["notes"][0]["image_analysis"]["places"] == ["清晖园"]
+    assert payload["notes"][0]["image_analysis"]["foods"] == ["双皮奶"]
+    assert out["data"]["visual_clues"] == ["图片文字显示清晖园 09:00"]
+    assert out["meta"]["image_analysis_count"] == 1
+    assert run_calls[0] == ["search", "顺德旅游攻略", "--sort", "popular", "--type", "all", "--page", "1"]
 
 
 @pytest.mark.asyncio
