@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { createSession, getSession, listSessions } from '../api/sessions'
-import type { DayPlan, Budget, TripItem, SessionSnapshot } from '../types'
+import type { DayPlan, Budget, TripItem, SessionSnapshot, ClarifyPayload } from '../types'
 
 export interface ToolStep {
   tool: string
@@ -14,6 +14,7 @@ export interface Message {
   content: string
   kind?: 'text' | 'error'
   toolSteps?: ToolStep[]
+  clarify?: ClarifyPayload
 }
 
 export interface Conversation {
@@ -152,6 +153,14 @@ export const useTripStore = defineStore('trip', () => {
     if (msg) msg.content += text
   }
 
+  const addClarifyMessage = (payload: ClarifyPayload) => {
+    const msg = ensureAssistantMessage()
+    if (!msg) return
+    msg.content = payload.question
+    msg.kind = 'text'
+    msg.clarify = payload
+  }
+
   const startNode = (node: string, label?: string) => {
     agentProgress.value[node] = 'running'
     if (label) nodeLabels.value[node] = label
@@ -262,6 +271,7 @@ export const useTripStore = defineStore('trip', () => {
     activeDay, activePoiId, activeTransport, budget,
     loadConversations, loadConversation, createConversation, ensureConversation,
     addMessage, appendToLastMessage, startNode, endNode, clearProgress,
+    addClarifyMessage,
     startToolCall, endToolCall,
     setThreadId, setTitle, setDayPlans, setActiveDay,
     setActivePoi, setActiveTransport, setBudget, setPlanVersion, touchActive,

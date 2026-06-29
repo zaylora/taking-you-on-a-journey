@@ -18,6 +18,17 @@
           class="markdown-body"
           v-html="renderMarkdown(msg.content)"
         ></div>
+        <div v-if="msg.clarify?.options.length" class="clarify-options">
+          <el-button
+            v-for="option in msg.clarify.options"
+            :key="option"
+            size="small"
+            plain
+            @click="emit('clarify-answer', option)"
+          >
+            {{ option }}
+          </el-button>
+        </div>
         <!-- 内联思考提示：工具链已收尾(全部 ✓)但正文尚未开始的间隙，
              或工具间的思考窗口，仍提示 Agent 在工作，避免界面"卡住" -->
         <div v-if="inlineThinking(msg, index)" class="thinking-bubble">
@@ -49,6 +60,10 @@ import AgentProgress from './AgentProgress.vue'
 const props = defineProps<{
   messages: Message[],
   loading: boolean
+}>()
+
+const emit = defineEmits<{
+  (e: 'clarify-answer', answer: string): void
 }>()
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
@@ -147,6 +162,12 @@ watch([() => props.messages, showStandaloneThinking, () => props.loading], () =>
   background: #ecf5ff;
 }
 .content.error-bubble { background: #fef0f0; border: 1px solid #fde2e2; color: #c45656; }
+.clarify-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 10px;
+}
 
 /* 瞬态思考气泡 */
 .thinking-bubble {

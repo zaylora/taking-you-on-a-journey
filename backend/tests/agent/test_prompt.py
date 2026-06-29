@@ -104,10 +104,12 @@ def test_prompt_does_not_duplicate_registered_tool_catalog():
     assert leaked == []
 
 
-def test_prompt_asks_for_missing_info_without_special_clarify_tool():
+def test_prompt_asks_for_missing_info_with_structured_clarification_tool():
     p = TRIP_AGENT_SYS
     tool_names = {getattr(t, "name", "") for t in _TOOLS}
+    assert "ask_clarification" in tool_names
     assert "ask_user" not in tool_names
     assert "ask_user" not in p
-    assert "澄清" not in p
-    assert "直接回复提问" in p
+    assert "结构化澄清工具" in p
+    assert "一次只问当前最关键的 1 个问题" in p
+    assert "直接回复提问" not in p

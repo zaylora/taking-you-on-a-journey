@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """ReAct Agent tool exports."""
 from app.agent.tools.budget import compute_budget_tool, finalize_plan
+from app.agent.tools.clarify import ask_clarification
 from app.agent.tools.itinerary import assemble_itinerary
 from app.agent.tools.lodging import assign_hotels
 from app.agent.tools.time import get_current_time
@@ -22,6 +23,7 @@ __all__ = [
     "assign_hotels",
     "compute_budget_tool",
     "finalize_plan",
+    "ask_clarification",
     "xhs_status",
     "research_xhs_travel_guide",
     "xhs_search_notes",

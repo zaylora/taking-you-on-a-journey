@@ -144,6 +144,71 @@ class _FakeGraphThatFails:
         raise RuntimeError("boom")
 
 
+class _FakeGraphWithClarification:
+    def __init__(self):
+        self._state_calls = 0
+
+    async def aget_state(self, _config):
+        self._state_calls += 1
+        if self._state_calls == 1:
+            return SimpleNamespace(values={})
+        return SimpleNamespace(values={
+            "messages": [],
+            "clarification_request": {
+                "field": "city",
+                "question": "你想去哪个城市？",
+                "options": ["成都", "重庆"],
+            },
+            "day_plans": [],
+            "budget_check": {},
+            "plan_version": 0,
+            "changed_days": [],
+        })
+
+    async def astream_events(self, _stream_input, *, config, version):
+        yield {
+            "event": "on_tool_start",
+            "name": "ask_clarification",
+            "data": {"input": {"field": "city"}},
+        }
+        yield {
+            "event": "on_tool_end",
+            "name": "ask_clarification",
+            "data": {"input": {"field": "city"}},
+        }
+
+
+class _FakeGraphWithStaleClarification:
+    def __init__(self):
+        self._state_calls = 0
+
+    async def aget_state(self, _config):
+        self._state_calls += 1
+        if self._state_calls == 1:
+            return SimpleNamespace(values={
+                "clarification_request": {
+                    "field": "city",
+                    "question": "旧问题",
+                    "options": ["成都"],
+                },
+            })
+        return SimpleNamespace(values={
+            "messages": [AIMessage(content="继续规划。")],
+            "clarification_request": {
+                "field": "city",
+                "question": "旧问题",
+                "options": ["成都"],
+            },
+            "day_plans": [],
+            "budget_check": {},
+            "plan_version": 0,
+            "changed_days": [],
+        })
+
+    async def astream_events(self, _stream_input, *, config, version):
+        yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="继续规划。")}}
+
+
 @pytest.mark.anyio
 async def test_sse_events_persists_ui_history_matching_realtime_stream(tmp_path):
     store = SessionStore(str(tmp_path / "sessions.sqlite"))
@@ -219,6 +284,70 @@ async def test_sse_events_seeds_existing_graph_history_before_persisting_new_tur
         ("assistant", "旧答案"),
         ("user", "新问题"),
         ("assistant", "新答案"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_sse_events_emits_clarify_and_stops_without_final(tmp_path):
+    store = SessionStore(str(tmp_path / "sessions.sqlite"))
+    await store.setup()
+    session = await store.create_session()
+
+    async def _is_disconnected():
+        return False
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(
+            graph=_FakeGraphWithClarification(),
+            session_store=store,
+        )),
+        is_disconnected=_is_disconnected,
+    )
+
+    events = [event async for event in sse_events("帮我做旅行攻略", session["thread_id"], request)]
+
+    names = [event["event"] for event in events]
+    assert "clarify" in names
+    assert "final" not in names
+    clarify = next(event for event in events if event["event"] == "clarify")
+    assert json.loads(clarify["data"]) == {
+        "field": "city",
+        "question": "你想去哪个城市？",
+        "options": ["成都", "重庆"],
+    }
+    messages = await store.list_ui_messages(session["thread_id"])
+    assert [(m["role"], m["content"]) for m in messages] == [
+        ("user", "帮我做旅行攻略"),
+        ("assistant", "你想去哪个城市？"),
+    ]
+
+
+@pytest.mark.anyio
+async def test_sse_events_ignores_stale_clarification_when_current_run_did_not_ask(tmp_path):
+    store = SessionStore(str(tmp_path / "sessions.sqlite"))
+    await store.setup()
+    session = await store.create_session()
+
+    async def _is_disconnected():
+        return False
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(
+            graph=_FakeGraphWithStaleClarification(),
+            session_store=store,
+        )),
+        is_disconnected=_is_disconnected,
+    )
+
+    events = [event async for event in sse_events("成都", session["thread_id"], request)]
+
+    names = [event["event"] for event in events]
+    assert "clarify" not in names
+    assert "final" in names
+    messages = await store.list_ui_messages(session["thread_id"])
+    assert [(m["role"], m["content"]) for m in messages] == [
+        ("user", "成都"),
+        ("assistant", "继续规划。"),
     ]
 
 

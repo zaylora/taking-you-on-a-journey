@@ -15,7 +15,7 @@
         <span class="session-title">{{ conversation.title }}</span>
       </button>
     </div>
-    <MessageList :messages="tripStore.messages" :loading="loading" />
+    <MessageList :messages="tripStore.messages" :loading="loading" @clarify-answer="send" />
     <div class="quick-prompts" v-if="!loading && tripStore.messages.length > 0">
       <el-tag round type="info" class="prompt-chip" @click="send('预算大概多少？')">预算大概多少？</el-tag>
       <el-tag round type="info" class="prompt-chip" @click="send('推荐一些当地美食')">推荐一些当地美食</el-tag>

@@ -18,5 +18,6 @@ class TripState(AgentState):
     budget_check: dict
     retry_count: int
     summary: str
+    clarification_request: dict
     # 带 reducer：同一 step 多个 xhs tool 各写增量时由 reducer 合并去重，避免并发写冲突
     xhs_sources: Annotated[list, merge_xhs_sources]

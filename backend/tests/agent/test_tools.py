@@ -903,6 +903,50 @@ async def test_finalize_plan_writes_and_diffs(fake_amap):
     assert cmd.update["plan_version"] == 1
 
 
+@pytest.mark.asyncio
+async def test_ask_clarification_writes_structured_request(fake_amap):
+    cmd = await tools.ask_clarification.ainvoke({
+        "type": "tool_call",
+        "name": "ask_clarification",
+        "id": "clarify-1",
+        "args": {
+            "field": "city",
+            "question": "你想去哪个城市？",
+            "options": ["成都", "重庆", "顺德", "其他"],
+        },
+    })
+
+    assert isinstance(cmd, _Command)
+    request = cmd.update["clarification_request"]
+    assert request == {
+        "field": "city",
+        "question": "你想去哪个城市？",
+        "options": ["成都", "重庆", "顺德", "其他"],
+    }
+    assert cmd.update["messages"][0].tool_call_id == "clarify-1"
+
+
+@pytest.mark.asyncio
+async def test_ask_clarification_trims_options_to_four_and_drops_blank_values(fake_amap):
+    cmd = await tools.ask_clarification.ainvoke({
+        "type": "tool_call",
+        "name": "ask_clarification",
+        "id": "clarify-2",
+        "args": {
+            "field": "days",
+            "question": "你打算玩几天？",
+            "options": [" 2 天 ", "", "3 天", "4 天", "5 天"],
+        },
+    })
+
+    assert isinstance(cmd, _Command)
+    assert cmd.update["clarification_request"] == {
+        "field": "days",
+        "question": "你打算玩几天？",
+        "options": ["2 天", "3 天", "4 天", "5 天"],
+    }
+
+
 def test_build_note_url_with_token():
     url = xhs_tools._build_note_url("abc123", "TOKENXYZ")
     assert url == "https://www.xiaohongshu.com/explore/abc123?xsec_token=TOKENXYZ&xsec_source=pc_search"

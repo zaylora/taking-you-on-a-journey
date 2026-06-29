@@ -9,6 +9,7 @@ EVENT_TOKEN = "token"            # data: {"text": "成"}
 EVENT_NODE_END = "node_end"      # data: {"node": "summarize"}
 EVENT_FINAL = "final"            # data: {"answer": "完整回答文本"} —— 结束信号
 EVENT_ERROR = "error"            # data: {"message": "用户可读的错误"}（脱敏）
+EVENT_CLARIFY = "clarify"        # data: {"field","question","options"} —— 缺口澄清
 
 EVENT_SESSION = "session"   # data: {"thread_id": "<hex>"} —— 新会话首帧
 EVENT_TITLE = "title"       # data: {"thread_id","title"} —— 会话标题更新

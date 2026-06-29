@@ -6,6 +6,7 @@ import type {
   EventName, NodeStartPayload, TokenPayload, NodeEndPayload,
   ErrorPayload, SessionPayload, FinalPayload,
   TitlePayload, PlanPatchPayload, ToolCallPayload, ToolResultPayload,
+  ClarifyPayload,
 } from '../types'
 
 export function useSSE() {
@@ -56,6 +57,11 @@ export function useSSE() {
             break
           case 'token':
             tripStore.appendToLastMessage((data as TokenPayload).text)
+            break
+          case 'clarify':
+            tripStore.addClarifyMessage(data as ClarifyPayload)
+            tripStore.touchActive()
+            loading.value = false
             break
           case 'final':
             tripStore.setDayPlans((data as FinalPayload).day_plans || [])

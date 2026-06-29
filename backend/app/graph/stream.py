@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 from app.core.constants import (
     EVENT_SESSION, EVENT_NODE_START, EVENT_TOKEN, EVENT_NODE_END,
-    EVENT_FINAL, EVENT_ERROR, EVENT_PLAN_PATCH, EVENT_TITLE, NODE_LABELS,
+    EVENT_FINAL, EVENT_ERROR, EVENT_CLARIFY, EVENT_PLAN_PATCH, EVENT_TITLE, NODE_LABELS,
     EVENT_TOOL_CALL, EVENT_TOOL_RESULT,
 )
 from app.services.message_history import (
@@ -71,6 +71,7 @@ async def sse_events(message: str, thread_id: str | None, request):
         stream_input = {"messages": [HumanMessage(content=message)]}
         answer_parts: list[str] = []
         tool_steps: list[dict] = []
+        asked_clarification = False
 
         prior_state = await graph.aget_state(config)
         prior_values = prior_state.values or {}
@@ -118,6 +119,8 @@ async def sse_events(message: str, thread_id: str | None, request):
                         step["status"] = "done"
                         label = step["label"]
                         break
+                if name == "ask_clarification":
+                    asked_clarification = True
                 yield _sse(EVENT_TOOL_RESULT, {"tool": name, "label": label})
             elif kind == "on_chain_start" and name in NODE_LABELS:
                 yield _sse(EVENT_NODE_START, {"node": name, "label": NODE_LABELS[name]})
@@ -126,6 +129,31 @@ async def sse_events(message: str, thread_id: str | None, request):
 
         snap = await graph.aget_state(config)
         values = snap.values or {}
+        clarification = values.get("clarification_request") or {}
+        if asked_clarification and isinstance(clarification, dict) and clarification.get("question"):
+            payload = {
+                "field": str(clarification.get("field") or ""),
+                "question": str(clarification.get("question") or ""),
+                "options": clarification.get("options") if isinstance(clarification.get("options"), list) else [],
+            }
+            for step in tool_steps:
+                if step["status"] == "running":
+                    step["status"] = "done"
+            title = None
+            if session and session.get("title") == DEFAULT_TITLE:
+                title = title_from_message(message)
+            updated = await session_store.touch_session(thread_id, title=title)
+            await session_store.append_ui_message(thread_id, "user", message)
+            await session_store.append_ui_message(
+                thread_id,
+                "assistant",
+                payload["question"],
+                tool_steps=tool_steps,
+            )
+            yield _sse(EVENT_CLARIFY, payload)
+            if title and updated:
+                yield _sse(EVENT_TITLE, {"thread_id": thread_id, "title": updated["title"]})
+            return
         messages = values.get("messages", []) or []
         answer = ""
         for m in reversed(messages):

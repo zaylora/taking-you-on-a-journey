@@ -138,6 +138,10 @@ def build_tool_label(name: str | None, args: Mapping[str, Any] | None = None) ->
     if tool_name == "finalize_plan":
         return "确认行程"
 
+    if tool_name == "ask_clarification":
+        field = _first_text(tool_args, "field")
+        return "澄清旅行需求" + (f"：{field}" if field else "")
+
     if tool_name == "get_current_time":
         timezone = _first_text(tool_args, "timezone")
         return "获取当前时间" + (f"：{timezone}" if timezone else "")
