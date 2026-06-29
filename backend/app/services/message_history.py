@@ -114,10 +114,12 @@ def aggregate_messages(messages) -> list[dict]:
                     "content": content,
                     "kind": "text",
                     "tool_steps": tool_steps(message),
+                    "segments": build_segments([message]),
                 }
                 result.append(current_ai)
             else:
                 current_ai["tool_steps"].extend(tool_steps(message))
+                current_ai["segments"].extend(build_segments([message]))
                 if content:
                     current_ai["content"] = (
                         f"{current_ai['content']}{content}" if current_ai["content"] else content
@@ -141,17 +143,26 @@ def aggregate_messages(messages) -> list[dict]:
 
 
 def messages_with_xhs_sources(messages: list[dict], sources: list[dict]) -> list[dict]:
-    """Append rendered xhs source links to the latest assistant message for history replay."""
+    """把渲染好的小红书来源链接追加到最近 assistant 消息（content 与 segments 同步）。"""
     sources_md = render_xhs_sources(sources)
     if not sources_md:
         return messages
     result = [dict(message) for message in messages]
     for message in reversed(result):
-        if message.get("role") == "assistant":
-            content = message.get("content") or ""
-            if "## 笔记来源" not in content:
-                message["content"] = f"{content}{sources_md}" if content else sources_md.lstrip()
+        if message.get("role") != "assistant":
+            continue
+        content = message.get("content") or ""
+        if "## 笔记来源" in content:
             break
+        message["content"] = f"{content}{sources_md}" if content else sources_md.lstrip()
+        segments = [dict(s) for s in (message.get("segments") or [])]
+        text_segs = [s for s in segments if s.get("kind") == "text"]
+        if text_segs:
+            text_segs[-1]["text"] = f"{text_segs[-1]['text']}{sources_md}"
+        else:
+            segments.append({"kind": "text", "text": sources_md.lstrip()})
+        message["segments"] = segments
+        break
     return result
 
 
@@ -218,11 +229,18 @@ def reconstruct_messages_from_history(history_values: list[dict]) -> list[dict]:
 
     result = user_messages[:1]
     if assistant_content or assistant_tools:
+        rebuilt = segments_for_assistant((history_values[0] or {}).get("messages", []) or [])
+        if not rebuilt:
+            rebuilt = [{"kind": "tool", **{k: v for k, v in s.items() if k != "status"}, "status": "done"}
+                       for s in assistant_tools]
+            if assistant_content:
+                rebuilt.append({"kind": "text", "text": assistant_content})
         result.append({
             "role": "assistant",
             "content": assistant_content,
             "kind": "text",
             "tool_steps": assistant_tools,
+            "segments": rebuilt,
         })
     return result
 

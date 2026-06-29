@@ -287,3 +287,24 @@ def test_segments_for_assistant_no_human_uses_all():
         {"kind": "tool", "tool": "get_weather", "label": "查询天气", "status": "done"},
         {"kind": "text", "text": "收尾"},
     ]
+
+
+def test_messages_with_xhs_sources_appends_to_last_text_segment():
+    sources_md_marker = "## 笔记来源"
+    messages = [
+        {
+            "role": "assistant",
+            "content": "这是顺德攻略。",
+            "kind": "text",
+            "tool_steps": [],
+            "segments": [{"kind": "text", "text": "这是顺德攻略。"}],
+        },
+    ]
+    sources = [{"title": "顺德一日游", "url": "https://www.xiaohongshu.com/explore/note-1"}]
+
+    result = _messages_with_xhs_sources(messages, sources)
+
+    last_text = [s for s in result[0]["segments"] if s["kind"] == "text"][-1]
+    assert sources_md_marker in last_text["text"]
+    assert "note-1" in last_text["text"]
+    assert sources_md_marker in result[0]["content"]
