@@ -21,6 +21,7 @@ export function useSSE() {
     try {
       const activeThreadId = await tripStore.ensureConversation()
       tripStore.addMessage('user', message)
+      tripStore.setPendingClarify(null)
       tripStore.clearProgress()
       abortController = new AbortController()
 
@@ -56,10 +57,11 @@ export function useSSE() {
             tripStore.endToolCall((data as ToolResultPayload).tool)
             break
           case 'token':
-            tripStore.appendToLastMessage((data as TokenPayload).text)
+            tripStore.appendToken((data as TokenPayload).text)
             break
           case 'clarify':
             tripStore.addClarifyMessage(data as ClarifyPayload)
+            tripStore.setPendingClarify(data as ClarifyPayload)
             tripStore.touchActive()
             loading.value = false
             break
