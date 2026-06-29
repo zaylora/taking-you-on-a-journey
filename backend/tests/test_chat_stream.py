@@ -322,6 +322,11 @@ async def test_sse_events_emits_clarify_and_stops_without_final(tmp_path):
         ("user", "帮我做旅行攻略"),
         ("assistant", "你想去哪个城市？"),
     ]
+    assistant = messages[1]
+    assert assistant["segments"] == [
+        {"kind": "tool", "tool": "ask_clarification", "label": "澄清旅行需求：city", "status": "done"},
+        {"kind": "text", "text": "你想去哪个城市？"},
+    ]
 
 
 @pytest.mark.anyio

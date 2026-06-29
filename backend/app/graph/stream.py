@@ -156,6 +156,9 @@ async def sse_events(message: str, thread_id: str | None, request):
             for step in tool_steps:
                 if step["status"] == "running":
                     step["status"] = "done"
+            for seg in segments:
+                if seg["kind"] == "tool" and seg["status"] == "running":
+                    seg["status"] = "done"
             title = None
             if session and session.get("title") == DEFAULT_TITLE:
                 title = title_from_message(message)
