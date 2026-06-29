@@ -71,7 +71,15 @@ async def sse_events(message: str, thread_id: str | None, request):
         stream_input = {"messages": [HumanMessage(content=message)]}
         answer_parts: list[str] = []
         tool_steps: list[dict] = []
+        segments: list[dict] = []
         asked_clarification = False
+
+        def _push_token_segment(text: str) -> None:
+            """token 到达：末尾是 text 段则追加，否则新开一段（工具天然分界）。"""
+            if segments and segments[-1]["kind"] == "text":
+                segments[-1]["text"] += text
+            else:
+                segments.append({"kind": "text", "text": text})
 
         prior_state = await graph.aget_state(config)
         prior_values = prior_state.values or {}
@@ -100,17 +108,22 @@ async def sse_events(message: str, thread_id: str | None, request):
                 text = _as_text(chunk.content)
                 if text:
                     answer_parts.append(text)
+                    _push_token_segment(text)
                     yield _sse(EVENT_TOKEN, {"text": text})
             elif kind == "on_tool_start":
                 label = build_tool_label(name, _tool_input(ev))
                 for step in tool_steps:
                     if step["status"] == "running":
                         step["status"] = "done"
+                for seg in segments:
+                    if seg["kind"] == "tool" and seg["status"] == "running":
+                        seg["status"] = "done"
                 tool_steps.append({
                     "tool": name,
                     "label": label,
                     "status": "running",
                 })
+                segments.append({"kind": "tool", "tool": name, "label": label, "status": "running"})
                 yield _sse(EVENT_TOOL_CALL, {"tool": name, "label": label})
             elif kind == "on_tool_end":
                 label = build_tool_label(name, _tool_input(ev))
@@ -118,6 +131,10 @@ async def sse_events(message: str, thread_id: str | None, request):
                     if step["tool"] == name and step["status"] == "running":
                         step["status"] = "done"
                         label = step["label"]
+                        break
+                for seg in reversed(segments):
+                    if seg["kind"] == "tool" and seg["tool"] == name and seg["status"] == "running":
+                        seg["status"] = "done"
                         break
                 if name == "ask_clarification":
                     asked_clarification = True
@@ -144,11 +161,14 @@ async def sse_events(message: str, thread_id: str | None, request):
                 title = title_from_message(message)
             updated = await session_store.touch_session(thread_id, title=title)
             await session_store.append_ui_message(thread_id, "user", message)
+            clarify_segments = list(segments)
+            clarify_segments.append({"kind": "text", "text": payload["question"]})
             await session_store.append_ui_message(
                 thread_id,
                 "assistant",
                 payload["question"],
                 tool_steps=tool_steps,
+                segments=clarify_segments,
             )
             yield _sse(EVENT_CLARIFY, payload)
             if title and updated:
@@ -169,9 +189,13 @@ async def sse_events(message: str, thread_id: str | None, request):
                 yield _sse(EVENT_TOKEN, {"text": sources_md})
                 answer_parts.append(sources_md)
                 answer = answer + sources_md
+                _push_token_segment(sources_md)
         for step in tool_steps:
             if step["status"] == "running":
                 step["status"] = "done"
+        for seg in segments:
+            if seg["kind"] == "tool" and seg["status"] == "running":
+                seg["status"] = "done"
         ui_answer = "".join(answer_parts) or answer
         day_plans = values.get("day_plans", [])
         budget = values.get("budget_check", {})
@@ -190,6 +214,7 @@ async def sse_events(message: str, thread_id: str | None, request):
                 "assistant",
                 ui_answer,
                 tool_steps=tool_steps,
+                segments=segments,
             )
         yield _sse(EVENT_FINAL, {
             "answer": answer,

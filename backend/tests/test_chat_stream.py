@@ -238,17 +238,19 @@ async def test_sse_events_persists_ui_history_matching_realtime_stream(tmp_path)
         "- [顺德一日游](https://www.xiaohongshu.com/explore/note-1)"
     )
     assert messages == [
-        {"role": "user", "content": "帮我做顺德旅行攻略", "kind": "text", "tool_steps": []},
+        {"role": "user", "content": "帮我做顺德旅行攻略", "kind": "text",
+         "tool_steps": [], "segments": [{"kind": "text", "text": "帮我做顺德旅行攻略"}]},
         {
             "role": "assistant",
             "content": token_text,
             "kind": "text",
             "tool_steps": [
-                {
-                    "tool": "research_xhs_travel_guide",
-                    "label": "研究顺德1天美食小红书攻略",
-                    "status": "done",
-                },
+                {"tool": "research_xhs_travel_guide", "label": "研究顺德1天美食小红书攻略", "status": "done"},
+            ],
+            "segments": [
+                {"kind": "tool", "tool": "research_xhs_travel_guide",
+                 "label": "研究顺德1天美食小红书攻略", "status": "done"},
+                {"kind": "text", "text": token_text},
             ],
         },
     ]
@@ -370,6 +372,55 @@ async def test_sse_events_persists_error_history_matching_realtime_stream(tmp_pa
 
     assert events[-1]["event"] == "error"
     assert messages == [
-        {"role": "user", "content": "继续规划", "kind": "text", "tool_steps": []},
-        {"role": "assistant", "content": "生成失败，请重试", "kind": "error", "tool_steps": []},
+        {"role": "user", "content": "继续规划", "kind": "text", "tool_steps": [],
+         "segments": [{"kind": "text", "text": "继续规划"}]},
+        {"role": "assistant", "content": "生成失败，请重试", "kind": "error", "tool_steps": [],
+         "segments": [{"kind": "text", "text": "生成失败，请重试"}]},
     ]
+
+
+class _FakeGraphInterleaved:
+    def __init__(self):
+        self._state_calls = 0
+
+    async def aget_state(self, _config):
+        self._state_calls += 1
+        if self._state_calls == 1:
+            return SimpleNamespace(values={"xhs_sources": []})
+        return SimpleNamespace(values={
+            "messages": [AIMessage(content="成都行程如下。")],
+            "xhs_sources": [],
+            "day_plans": [], "budget_check": {}, "plan_version": 0, "changed_days": [],
+        })
+
+    async def astream_events(self, _stream_input, *, config, version):
+        yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="我先查天气。")}}
+        yield {"event": "on_tool_start", "name": "get_weather", "data": {"input": {"city": "成都"}}}
+        yield {"event": "on_tool_end", "name": "get_weather", "data": {"input": {"city": "成都"}}}
+        yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="成都行程如下。")}}
+
+
+@pytest.mark.anyio
+async def test_sse_events_persists_interleaved_segments(tmp_path):
+    store = SessionStore(str(tmp_path / "sessions.sqlite"))
+    await store.setup()
+    session = await store.create_session()
+
+    async def _is_disconnected():
+        return False
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(state=SimpleNamespace(graph=_FakeGraphInterleaved(), session_store=store)),
+        is_disconnected=_is_disconnected,
+    )
+
+    [event async for event in sse_events("成都三天", session["thread_id"], request)]
+    messages = await store.list_ui_messages(session["thread_id"])
+
+    assistant = messages[1]
+    assert assistant["segments"] == [
+        {"kind": "text", "text": "我先查天气。"},
+        {"kind": "tool", "tool": "get_weather", "label": "查询成都天气", "status": "done"},
+        {"kind": "text", "text": "成都行程如下。"},
+    ]
+
