@@ -120,6 +120,33 @@ MessageList 的 segment 循环）。pill 的 slide-fade 动画保留。
 
 > SessionSnapshot 的消息结构（`types/index.ts`）同步改为 segments。
 
+### 实时与历史完全一致（关键）
+
+历史回放真正读取的源**不是** graph checkpointer，而是 `session_store` 的 SQLite
+`session_messages` 表（`get_session` → `list_ui_messages`）。该表当前是写死的两列
+`content TEXT` + `tool_steps TEXT`（[session_store.py:47-58](backend/app/services/session_store.py#L47-L58)），
+`stream.py` 流式结束时调 `append_ui_message(content, tool_steps)` 落库——**顺序信息在落库这一步就丢了**。
+
+若不动这层，会出现「实时交错、刷新后历史塌回一坨文本+一坨工具」的不一致。**经用户确认要求完全一致**，
+故 segments 必须贯穿到持久化层：
+
+- **表结构**：`session_messages` 新增一列 `segments TEXT NOT NULL DEFAULT '[]'`（存 segments 的
+  JSON）。`content`/`tool_steps` 两列保留，仅用于兼容历史旧数据，新写入不再依赖。
+  `setup()` 用 `CREATE TABLE IF NOT EXISTS` + 一段「列不存在则 `ALTER TABLE ADD COLUMN`」的
+  幂等迁移（SQLite 支持 ADD COLUMN），避免破坏已有库。
+- **`append_ui_message`**：新增 `segments: list[dict] | None` 入参，json 序列化后写入新列。
+  `content`/`tool_steps` 仍按现状写入（向后兼容、便于纯文本检索）。
+- **`list_ui_messages`**：优先读 `segments` 列；若为空（旧数据），降级合成 segments
+  —— `content` 拆成 `{kind:'text', role:'answer'}`，`tool_steps` 依次转 `{kind:'tool', status:'done'}`
+  排在前面，保证旧会话不崩、形态尽量接近。
+- **`stream.py`**：流式过程中不再只攒 `answer_parts`+`tool_steps`，而是按 token/tool 到达顺序
+  维护一个 `segments` 列表（与前端 store 同构的构建逻辑），结束时 `append_ui_message(..., segments=segments)`。
+  澄清分支、笔记来源追加（`render_xhs_sources` 拼到最后一个 answer 段）同步走 segments。
+
+最终：**实时（useSSE→store）、历史（list_ui_messages→applySnapshot）、graph 重建回放
+（message_history）三条路径产出同一个 segments 结构，前端用同一套组件渲染**，交错顺序与
+reasoning 折叠态完全一致。
+
 ### 安全约定变更
 
 AGENTS.md「中间节点的 LLM token 不暴露给前端，仅最终回复逐字流出」一条与本设计冲突。
@@ -169,7 +196,9 @@ AGENTS.md「中间节点的 LLM token 不暴露给前端，仅最终回复逐字
 | `frontend/src/components/ClarifyPanel.vue` | **新增** 浮层澄清面板 |
 | `frontend/src/components/ChatPanel.vue` | 挂载 ClarifyPanel |
 | `backend/app/services/message_history.py` | `aggregate_messages` 等产出 segments |
-| `backend/tests/...` | 历史回放 segments 单测；reducer/纯函数边界 |
+| `backend/app/services/session_store.py` | `session_messages` 加 `segments` 列 + 幂等迁移；`append_ui_message`/`list_ui_messages` 读写 segments，旧数据降级 |
+| `backend/app/graph/stream.py` | 流式按到达顺序维护 segments，落库 `append_ui_message(segments=...)` |
+| `backend/tests/...` | 历史回放 segments 单测；旧数据降级；reducer/纯函数边界 |
 | `AGENTS.md` | 更新 token 暴露约定 + SSE 契约说明 |
 
 ## 测试
@@ -187,3 +216,6 @@ AGENTS.md「中间节点的 LLM token 不暴露给前端，仅最终回复逐字
    结构清晰、交错天然、易支持淡色/折叠。
 3. **澄清问题仍留在消息流**（历史完整），选项**移出气泡**只在浮层，避免悬空按钮。
 4. 自定义澄清答案走普通消息通道，**后端零改动**。
+5. **segments 贯穿到 SQLite 持久化层**：实时流、历史读取、graph 重建三条路径产出同一
+   segments 结构，用同一套组件渲染，保证实时与历史完全一致；旧数据降级合成 segments
+   不崩。这是「实时渲染与历史记录一致吗」这一问题的最终答案——**一致**。
