@@ -19,6 +19,10 @@ export interface TitlePayload { thread_id: string; title: string }
 export interface PlanPatchPayload { plan_version: number; changed_days: number[] }
 export interface ClarifyPayload { field: string; question: string; options: string[] }
 
+export type Segment =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; tool: string; label: string; status: 'running' | 'done' }
+
 export interface SessionListItem {
   thread_id: string
   title: string
@@ -32,6 +36,7 @@ export interface SessionSnapshot extends SessionListItem {
     content: string
     kind?: 'text' | 'error'
     tool_steps?: Array<{ tool: string; label: string; status: 'done' }>
+    segments?: Segment[]
   }>
   day_plans: DayPlan[]
   budget: Budget | Record<string, never>

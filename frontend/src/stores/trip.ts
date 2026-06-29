@@ -1,19 +1,13 @@
 import { defineStore } from 'pinia'
 import { computed, ref } from 'vue'
 import { createSession, getSession, listSessions } from '../api/sessions'
-import type { DayPlan, Budget, TripItem, SessionSnapshot, ClarifyPayload } from '../types'
-
-export interface ToolStep {
-  tool: string
-  label: string
-  status: 'running' | 'done'
-}
+import type { DayPlan, Budget, TripItem, SessionSnapshot, ClarifyPayload, Segment } from '../types'
 
 export interface Message {
   role: 'user' | 'assistant'
-  content: string
+  content: string            // user/error 用；assistant 渲染走 segments
   kind?: 'text' | 'error'
-  toolSteps?: ToolStep[]
+  segments?: Segment[]
   clarify?: ClarifyPayload
 }
 
@@ -59,8 +53,8 @@ export const useTripStore = defineStore('trip', () => {
   const activeThreadId = ref<string | null>(localStorage.getItem(STORAGE_KEY))
   const agentProgress = ref<Record<string, 'running' | 'done'>>({})
   const nodeLabels = ref<Record<string, string>>({})
-  // 工具调用过程链：按发生顺序记录每次工具调用及其状态（running→done）
-  const toolSteps = ref<Array<{ tool: string; label: string; status: 'running' | 'done' }>>([])
+  const pendingClarify = ref<ClarifyPayload | null>(null)
+  const setPendingClarify = (p: ClarifyPayload | null) => { pendingClarify.value = p }
 
   const activeConversation = computed(() =>
     conversations.value.find((c) => c.threadId === activeThreadId.value) ?? null,
@@ -91,7 +85,9 @@ export const useTripStore = defineStore('trip', () => {
           role: m.role,
           content: m.content,
           kind: m.kind,
-          toolSteps: m.tool_steps?.map((s) => ({ ...s, status: 'done' as const })) || undefined,
+          segments: m.segments
+            ? m.segments.map((s) => s.kind === 'tool' ? { ...s, status: 'done' as const } : s)
+            : undefined,
         })),
       dayPlans: snapshot.day_plans || [],
       budget: budgetFromSnapshot(snapshot),
@@ -106,7 +102,7 @@ export const useTripStore = defineStore('trip', () => {
   const clearProgress = () => {
     agentProgress.value = {}
     nodeLabels.value = {}
-    toolSteps.value = []
+    pendingClarify.value = null
   }
 
   const setActiveThread = (id: string | null) => {
@@ -145,17 +141,26 @@ export const useTripStore = defineStore('trip', () => {
   }
 
   const addMessage = (role: 'user' | 'assistant', content: string, kind: 'text' | 'error' = 'text') => {
-    activeConversation.value?.messages.push({ role, content, kind })
+    activeConversation.value?.messages.push({
+      role, content, kind,
+      segments: [{ kind: 'text', text: content }],
+    })
   }
 
-  const appendToLastMessage = (text: string) => {
+  const appendToken = (text: string) => {
     const msg = ensureAssistantMessage()
-    if (msg) msg.content += text
+    if (!msg) return
+    if (!msg.segments) msg.segments = []
+    const last = msg.segments[msg.segments.length - 1]
+    if (last && last.kind === 'text') last.text += text
+    else msg.segments.push({ kind: 'text', text })
   }
 
   const addClarifyMessage = (payload: ClarifyPayload) => {
     const msg = ensureAssistantMessage()
     if (!msg) return
+    if (!msg.segments) msg.segments = []
+    msg.segments.push({ kind: 'text', text: payload.question })
     msg.content = payload.question
     msg.kind = 'text'
     msg.clarify = payload
@@ -175,7 +180,7 @@ export const useTripStore = defineStore('trip', () => {
     if (!current) return null
     const last = current.messages[current.messages.length - 1]
     if (last && last.role === 'assistant') return last
-    const msg: Message = { role: 'assistant', content: '', kind: 'text' }
+    const msg: Message = { role: 'assistant', content: '', kind: 'text', segments: [] }
     current.messages.push(msg)
     return msg
   }
@@ -184,19 +189,20 @@ export const useTripStore = defineStore('trip', () => {
   const startToolCall = (tool: string, label: string) => {
     const msg = ensureAssistantMessage()
     if (!msg) return
-    if (!msg.toolSteps) msg.toolSteps = []
-    for (const s of msg.toolSteps) if (s.status === 'running') s.status = 'done'
-    msg.toolSteps.push({ tool, label, status: 'running' })
+    if (!msg.segments) msg.segments = []
+    for (const s of msg.segments) if (s.kind === 'tool' && s.status === 'running') s.status = 'done'
+    msg.segments.push({ kind: 'tool', tool, label, status: 'running' })
   }
   // 工具结束：把最近一个同名 running 步骤标记 done
   const endToolCall = (tool: string) => {
     const current = activeConversation.value
     if (!current) return
     const last = current.messages[current.messages.length - 1]
-    if (last && last.role === 'assistant' && last.toolSteps) {
-      for (let i = last.toolSteps.length - 1; i >= 0; i--) {
-        if (last.toolSteps[i].tool === tool && last.toolSteps[i].status === 'running') {
-          last.toolSteps[i].status = 'done'
+    if (last && last.role === 'assistant' && last.segments) {
+      for (let i = last.segments.length - 1; i >= 0; i--) {
+        const s = last.segments[i]
+        if (s.kind === 'tool' && s.tool === tool && s.status === 'running') {
+          s.status = 'done'
           break
         }
       }
@@ -267,11 +273,11 @@ export const useTripStore = defineStore('trip', () => {
   return {
     conversations, activeThreadId, activeConversation,
     messages, agentProgress, nodeLabels, threadId, dayPlans,
-    toolSteps,
+    pendingClarify,
     activeDay, activePoiId, activeTransport, budget,
     loadConversations, loadConversation, createConversation, ensureConversation,
-    addMessage, appendToLastMessage, startNode, endNode, clearProgress,
-    addClarifyMessage,
+    addMessage, appendToken, startNode, endNode, clearProgress,
+    addClarifyMessage, setPendingClarify,
     startToolCall, endToolCall,
     setThreadId, setTitle, setDayPlans, setActiveDay,
     setActivePoi, setActiveTransport, setBudget, setPlanVersion, touchActive,
