@@ -59,16 +59,8 @@ def tool_steps(message) -> list[dict]:
 
 
 def _tool_segments(message) -> list[dict]:
-    """把一个 AIMessage 的 tool_calls 转成 tool 段（历史一律 done）。"""
-    return [
-        {
-            "kind": "tool",
-            "tool": tc["name"],
-            "label": build_tool_label(tc.get("name"), tc.get("args") or {}),
-            "status": "done",
-        }
-        for tc in (getattr(message, "tool_calls", None) or [])
-    ]
+    """把一个 AIMessage 的 tool_calls 转成 tool 段（历史一律 done），复用 tool_steps 避免重复。"""
+    return [{**step, "kind": "tool"} for step in tool_steps(message)]
 
 
 def build_segments(messages) -> list[dict]:

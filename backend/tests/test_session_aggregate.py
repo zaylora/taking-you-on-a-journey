@@ -9,6 +9,7 @@ from langchain_core.messages import AIMessage, HumanMessage, ToolMessage, System
 from app.api.sessions import _aggregate_messages
 from app.api.sessions import _messages_with_xhs_sources
 from app.services.message_history import reconstruct_messages_from_history
+from app.services.message_history import build_segments, segments_for_assistant
 
 
 def _ai_with_tool_calls(content, tools):
@@ -216,8 +217,6 @@ def test_reconstruct_messages_from_history_keeps_repeated_tool_calls():
     ]
 
 
-from app.services.message_history import build_segments
-
 
 def test_build_segments_interleaves_text_and_tools():
     messages = [
@@ -256,4 +255,35 @@ def test_build_segments_skips_empty_text_and_tool_messages():
     assert segments == [
         {"kind": "tool", "tool": "get_weather", "label": "查询天气", "status": "done"},
         {"kind": "text", "text": "好了。"},
+    ]
+
+
+def test_segments_for_assistant_returns_only_last_round():
+    messages = [
+        HumanMessage(content="第一问"),
+        AIMessage(content="第一答"),
+        HumanMessage(content="第二问"),
+        AIMessage(content="第二答", tool_calls=[{"name": "get_weather", "args": {"city": "成都"}, "id": "c0"}]),
+        ToolMessage(content="晴", tool_call_id="c0"),
+        AIMessage(content="最终答"),
+    ]
+    segments = segments_for_assistant(messages)
+    assert segments == [
+        {"kind": "text", "text": "第二答"},
+        {"kind": "tool", "tool": "get_weather", "label": "查询成都天气", "status": "done"},
+        {"kind": "text", "text": "最终答"},
+    ]
+
+
+def test_segments_for_assistant_no_human_uses_all():
+    messages = [
+        AIMessage(content="直接答", tool_calls=[{"name": "get_weather", "args": {}, "id": "c0"}]),
+        ToolMessage(content="晴", tool_call_id="c0"),
+        AIMessage(content="收尾"),
+    ]
+    segments = segments_for_assistant(messages)
+    assert segments == [
+        {"kind": "text", "text": "直接答"},
+        {"kind": "tool", "tool": "get_weather", "label": "查询天气", "status": "done"},
+        {"kind": "text", "text": "收尾"},
     ]
