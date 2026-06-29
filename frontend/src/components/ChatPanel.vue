@@ -15,13 +15,16 @@
         <span class="session-title">{{ conversation.title }}</span>
       </button>
     </div>
-    <MessageList :messages="tripStore.messages" :loading="loading" @clarify-answer="send" />
+    <MessageList :messages="tripStore.messages" :loading="loading" />
     <div class="quick-prompts" v-if="!loading && tripStore.messages.length > 0">
       <el-tag round type="info" class="prompt-chip" @click="send('预算大概多少？')">预算大概多少？</el-tag>
       <el-tag round type="info" class="prompt-chip" @click="send('推荐一些当地美食')">推荐一些当地美食</el-tag>
       <el-tag round type="info" class="prompt-chip" @click="send('调整为 7 天行程')">调整为 7 天行程</el-tag>
     </div>
-    <ChatInput :loading="loading" @send="send" @abort="abort" />
+    <div class="input-area">
+      <ClarifyPanel :loading="loading" @answer="send" />
+      <ChatInput :loading="loading" @send="send" @abort="abort" />
+    </div>
   </div>
 </template>
 
@@ -30,6 +33,7 @@ import { useTripStore } from '../stores/trip'
 import { useSSE } from '../composables/useSSE'
 import MessageList from './MessageList.vue'
 import ChatInput from './ChatInput.vue'
+import ClarifyPanel from './ClarifyPanel.vue'
 
 const tripStore = useTripStore()
 const { loading, send, abort } = useSSE()
@@ -111,4 +115,5 @@ const switchConversation = async (threadId: string) => {
   background-color: #ecf5ff;
   color: #409eff;
 }
+.input-area { position: relative; }
 </style>
