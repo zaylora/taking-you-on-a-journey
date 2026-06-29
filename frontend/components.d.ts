@@ -11,7 +11,6 @@ export {}
 /* prettier-ignore */
 declare module 'vue' {
   export interface GlobalComponents {
-    AgentProgress: typeof import('./src/components/AgentProgress.vue')['default']
     AppHeader: typeof import('./src/components/AppHeader.vue')['default']
     AppSidebar: typeof import('./src/components/AppSidebar.vue')['default']
     ChatInput: typeof import('./src/components/ChatInput.vue')['default']

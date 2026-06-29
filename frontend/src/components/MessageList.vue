@@ -9,28 +9,25 @@
         {{ msg.role === 'user' ? 'U' : 'AI' }}
       </div>
       <div class="content" :class="{ 'error-bubble': msg.kind === 'error' }">
-        <AgentProgress
-          v-if="msg.role === 'assistant' && msg.toolSteps?.length"
-          :tool-steps="msg.toolSteps"
-        />
-        <div
-          v-if="msg.content"
-          class="markdown-body"
-          v-html="renderMarkdown(msg.content)"
-        ></div>
-        <div v-if="msg.clarify?.options.length" class="clarify-options">
-          <el-button
-            v-for="option in msg.clarify.options"
-            :key="option"
-            size="small"
-            plain
-            @click="emit('clarify-answer', option)"
-          >
-            {{ option }}
-          </el-button>
-        </div>
-        <!-- 内联思考提示：工具链已收尾(全部 ✓)但正文尚未开始的间隙，
-             或工具间的思考窗口，仍提示 Agent 在工作，避免界面"卡住" -->
+        <template v-for="(seg, sIdx) in displaySegments(msg)" :key="sIdx">
+          <!-- 工具 pill -->
+          <div v-if="seg.kind === 'tool'" class="node-pill" :class="{ done: seg.status === 'done' }">
+            <span v-if="seg.status === 'running'" class="loading-icon"></span>
+            <span v-else class="done-icon">✓</span>
+            <span class="node-label">{{ seg.label }}</span>
+          </div>
+          <!-- 最终回复：黑色常展开 -->
+          <div v-else-if="seg.role === 'answer'" class="markdown-body" v-html="renderMarkdown(seg.text)"></div>
+          <!-- 中间推理：淡色，写完折叠 -->
+          <div v-else class="reasoning-block">
+            <div class="reasoning-head" @click="toggleReasoning(index, sIdx)">
+              <span class="reasoning-caret">{{ isReasoningOpen(index, sIdx, seg) ? '▾' : '▸' }}</span>
+              <span>{{ isReasoningOpen(index, sIdx, seg) ? '思考中…' : '已思考' }}</span>
+            </div>
+            <div v-if="isReasoningOpen(index, sIdx, seg)" class="reasoning-body markdown-body"
+                 v-html="renderMarkdown(seg.text)"></div>
+          </div>
+        </template>
         <div v-if="inlineThinking(msg, index)" class="thinking-bubble">
           <span class="loading-icon"></span>
           <span>{{ thinkingLabel }}</span>
@@ -55,15 +52,10 @@ import { ref, watch, nextTick, computed } from 'vue'
 import MarkdownIt from 'markdown-it'
 import type { Message } from '../stores/trip'
 import { useTripStore } from '../stores/trip'
-import AgentProgress from './AgentProgress.vue'
 
 const props = defineProps<{
   messages: Message[],
   loading: boolean
-}>()
-
-const emit = defineEmits<{
-  (e: 'clarify-answer', answer: string): void
 }>()
 
 const md = new MarkdownIt({ breaks: true, linkify: true })
@@ -73,6 +65,39 @@ const renderMarkdown = (text: unknown) => {
 }
 
 const tripStore = useTripStore()
+
+type DisplaySegment =
+  | { kind: 'tool'; tool: string; label: string; status: 'running' | 'done' }
+  | { kind: 'text'; text: string; role: 'reasoning' | 'answer' }
+
+// 渲染期判定：最后一个 text 段为 answer，其余为 reasoning
+const displaySegments = (msg: Message): DisplaySegment[] => {
+  const segs = msg.segments ?? []
+  let lastTextIdx = -1
+  segs.forEach((s, i) => { if (s.kind === 'text') lastTextIdx = i })
+  return segs.map((s, i) => {
+    if (s.kind === 'tool') return s
+    return { kind: 'text', text: s.text, role: i === lastTextIdx ? 'answer' : 'reasoning' }
+  })
+}
+
+// 用户手动展开的 reasoning 段：键为 `${msgIdx}:${segIdx}`
+const manuallyOpen = ref<Set<string>>(new Set())
+const reasoningKey = (m: number, s: number) => `${m}:${s}`
+const toggleReasoning = (m: number, s: number) => {
+  const k = reasoningKey(m, s)
+  const next = new Set(manuallyOpen.value)
+  next.has(k) ? next.delete(k) : next.add(k)
+  manuallyOpen.value = next
+}
+// 展开条件：用户手动展开，或它是最后一条消息里正在写入的最后一段（流式中）
+const isReasoningOpen = (m: number, s: number, _seg: DisplaySegment): boolean => {
+  if (manuallyOpen.value.has(reasoningKey(m, s))) return true
+  if (!props.loading) return false
+  if (m !== props.messages.length - 1) return false
+  const segs = props.messages[m].segments ?? []
+  return s === segs.length - 1 && segs[s]?.kind === 'text'
+}
 
 // 是否存在可复用的 assistant 占位消息（最后一条是 assistant）
 const hasAssistantPlaceholder = computed(() => {
@@ -91,8 +116,10 @@ const inlineThinking = (msg: Message, index: number) => {
   if (!props.loading) return false
   if (index !== props.messages.length - 1) return false
   if (msg.role !== 'assistant') return false
-  if (msg.content) return false
-  if (msg.toolSteps?.some((s) => s.status === 'running')) return false
+  const segs = msg.segments ?? []
+  const last = segs[segs.length - 1]
+  if (last && last.kind === 'text' && last.text) return false  // 正在出正文
+  if (segs.some((s) => s.kind === 'tool' && s.status === 'running')) return false
   return true
 }
 
@@ -162,12 +189,6 @@ watch([() => props.messages, showStandaloneThinking, () => props.loading], () =>
   background: #ecf5ff;
 }
 .content.error-bubble { background: #fef0f0; border: 1px solid #fde2e2; color: #c45656; }
-.clarify-options {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 10px;
-}
 
 /* 瞬态思考气泡 */
 .thinking-bubble {
@@ -192,6 +213,30 @@ watch([() => props.messages, showStandaloneThinking, () => props.loading], () =>
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
 }
+
+/* Tool pill 样式（从 AgentProgress 迁移） */
+.node-pill {
+  display: inline-flex; align-items: center; padding: 6px 14px; margin: 4px 0;
+  background-color: var(--el-fill-color-light, #f4f4f5);
+  border: 1px solid var(--el-border-color-lighter, #e4e7ed);
+  border-radius: 20px; font-size: 13px; color: var(--el-text-color-regular, #606266);
+}
+.node-pill.done { opacity: 0.7; background-color: var(--el-color-success-light-9, #f0f9eb);
+  border-color: var(--el-color-success-light-7, #e1f3d8); }
+.node-pill .node-label { line-height: 1; font-weight: 500; }
+.node-pill .loading-icon { width: 12px; height: 12px; margin-right: 8px;
+  border: 2px solid var(--el-color-primary, #409eff); border-top-color: transparent;
+  border-radius: 50%; animation: spin 0.8s linear infinite; }
+.node-pill .done-icon { width: 12px; height: 12px; margin-right: 8px;
+  color: var(--el-color-success, #67c23a); font-weight: bold; line-height: 12px; text-align: center; }
+
+/* Reasoning 折叠块样式 */
+.reasoning-block { margin: 6px 0; }
+.reasoning-head { display: inline-flex; align-items: center; gap: 6px; cursor: pointer;
+  color: var(--el-text-color-secondary, #909399); font-size: 13px; user-select: none; }
+.reasoning-caret { font-size: 11px; }
+.reasoning-body { color: var(--el-text-color-secondary, #909399); font-size: 13px;
+  margin-top: 4px; padding-left: 14px; border-left: 2px solid var(--el-border-color-lighter, #e4e7ed); }
 
 /* Markdown Styles */
 :deep(.markdown-body p) {
@@ -241,13 +286,13 @@ watch([() => props.messages, showStandaloneThinking, () => props.loading], () =>
   border: 1px solid #dcdfe6;
   padding: 6px 12px;
 }
-:deep(.markdown-body h1), :deep(.markdown-body h2), :deep(.markdown-body h3), 
+:deep(.markdown-body h1), :deep(.markdown-body h2), :deep(.markdown-body h3),
 :deep(.markdown-body h4), :deep(.markdown-body h5), :deep(.markdown-body h6) {
   margin: 12px 0 8px 0;
   font-weight: 600;
 }
-:deep(.markdown-body h1:first-child), :deep(.markdown-body h2:first-child), 
-:deep(.markdown-body h3:first-child), :deep(.markdown-body h4:first-child), 
+:deep(.markdown-body h1:first-child), :deep(.markdown-body h2:first-child),
+:deep(.markdown-body h3:first-child), :deep(.markdown-body h4:first-child),
 :deep(.markdown-body h5:first-child), :deep(.markdown-body h6:first-child) {
   margin-top: 0;
 }
