@@ -58,6 +58,50 @@ def tool_steps(message) -> list[dict]:
     ]
 
 
+def _tool_segments(message) -> list[dict]:
+    """把一个 AIMessage 的 tool_calls 转成 tool 段（历史一律 done）。"""
+    return [
+        {
+            "kind": "tool",
+            "tool": tc["name"],
+            "label": build_tool_label(tc.get("name"), tc.get("args") or {}),
+            "status": "done",
+        }
+        for tc in (getattr(message, "tool_calls", None) or [])
+    ]
+
+
+def build_segments(messages) -> list[dict]:
+    """把一轮内的 AIMessage 序列按出现顺序转成交错的 text/tool 段。
+
+    意图：让历史回放与实时流呈现同一形态——文本与工具按时间顺序交错，
+    而非「正文一坨 + 工具一坨」。ToolMessage/SystemMessage 跳过；空文本块不产出 text 段。
+    """
+    segments: list[dict] = []
+    for message in messages:
+        if isinstance(message, (ToolMessage, SystemMessage)):
+            continue
+        if isinstance(message, HumanMessage):
+            if is_summarization_message(message):
+                continue
+            continue  # user 段由调用方处理，这里只攒 assistant 内容
+        if isinstance(message, AIMessage):
+            text = extract_content(message)
+            if text:
+                segments.append({"kind": "text", "text": text})
+            segments.extend(_tool_segments(message))
+    return segments
+
+
+def segments_for_assistant(messages) -> list[dict]:
+    """仅返回最后一个用户回合之后的 assistant segments。"""
+    last_human = -1
+    for idx, message in enumerate(messages):
+        if isinstance(message, HumanMessage) and not is_summarization_message(message):
+            last_human = idx
+    return build_segments(messages[last_human + 1:])
+
+
 def aggregate_messages(messages) -> list[dict]:
     """Collapse ReAct AIMessage groups into one assistant message per user turn."""
     result: list[dict] = []

@@ -214,3 +214,46 @@ def test_reconstruct_messages_from_history_keeps_repeated_tool_calls():
         "search_restaurants",
         "finalize_plan",
     ]
+
+
+from app.services.message_history import build_segments
+
+
+def test_build_segments_interleaves_text_and_tools():
+    messages = [
+        AIMessage(content="我先查一下天气。", tool_calls=[
+            {"name": "get_weather", "args": {"city": "成都"}, "id": "c0"},
+        ]),
+        ToolMessage(content="晴", tool_call_id="c0"),
+        AIMessage(content="天气不错，再看看景点。", tool_calls=[
+            {"name": "search_attractions", "args": {"city": "成都"}, "id": "c1"},
+        ]),
+        ToolMessage(content="武侯祠等", tool_call_id="c1"),
+        AIMessage(content="这是你的成都行程。"),
+    ]
+
+    segments = build_segments(messages)
+
+    assert segments == [
+        {"kind": "text", "text": "我先查一下天气。"},
+        {"kind": "tool", "tool": "get_weather", "label": "查询成都天气", "status": "done"},
+        {"kind": "text", "text": "天气不错，再看看景点。"},
+        {"kind": "tool", "tool": "search_attractions", "label": "搜索成都景点", "status": "done"},
+        {"kind": "text", "text": "这是你的成都行程。"},
+    ]
+
+
+def test_build_segments_skips_empty_text_and_tool_messages():
+    messages = [
+        SystemMessage(content="你是助手"),
+        AIMessage(content="", tool_calls=[{"name": "get_weather", "args": {}, "id": "c0"}]),
+        ToolMessage(content="晴", tool_call_id="c0"),
+        AIMessage(content="好了。"),
+    ]
+
+    segments = build_segments(messages)
+
+    assert segments == [
+        {"kind": "tool", "tool": "get_weather", "label": "查询天气", "status": "done"},
+        {"kind": "text", "text": "好了。"},
+    ]
