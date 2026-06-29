@@ -78,6 +78,7 @@ async def test_session_store_persists_ui_messages(tmp_path):
             "content": "帮我做顺德旅行攻略",
             "kind": "text",
             "tool_steps": [],
+            "segments": [{"kind": "text", "text": "帮我做顺德旅行攻略"}],
         },
         {
             "role": "assistant",
@@ -86,6 +87,11 @@ async def test_session_store_persists_ui_messages(tmp_path):
             "tool_steps": [
                 {"tool": "research_xhs_travel_guide", "label": "研究小红书攻略", "status": "done"},
                 {"tool": "finalize_plan", "label": "确认行程", "status": "done"},
+            ],
+            "segments": [
+                {"kind": "tool", "tool": "research_xhs_travel_guide", "label": "研究小红书攻略", "status": "done"},
+                {"kind": "tool", "tool": "finalize_plan", "label": "确认行程", "status": "done"},
+                {"kind": "text", "text": "这是顺德攻略。\n\n## 笔记来源\n- [顺德一日游](https://www.xiaohongshu.com/explore/note-1)"},
             ],
         },
     ]
@@ -185,4 +191,45 @@ async def test_snapshot_reconstructs_legacy_history_from_state_history(tmp_path)
         "search_restaurants",
         "assemble_itinerary",
         "finalize_plan",
+    ]
+
+
+@pytest.mark.anyio
+async def test_append_and_list_segments_roundtrip(tmp_path):
+    store = SessionStore(str(tmp_path / "s.sqlite"))
+    await store.setup()
+    session = await store.create_session()
+    segments = [
+        {"kind": "text", "text": "先查天气"},
+        {"kind": "tool", "tool": "get_weather", "label": "查询成都天气", "status": "done"},
+        {"kind": "text", "text": "成都行程如下"},
+    ]
+    await store.append_ui_message(
+        session["thread_id"], "assistant", "先查天气成都行程如下",
+        tool_steps=[{"tool": "get_weather", "label": "查询成都天气", "status": "done"}],
+        segments=segments,
+    )
+
+    messages = await store.list_ui_messages(session["thread_id"])
+
+    assert messages[0]["segments"] == segments
+
+
+@pytest.mark.anyio
+async def test_list_segments_degrades_legacy_rows(tmp_path):
+    """旧行无 segments：tool_steps 转 tool 段在前，content 转 text 段在后。"""
+    store = SessionStore(str(tmp_path / "s.sqlite"))
+    await store.setup()
+    session = await store.create_session()
+    # 不传 segments，模拟旧数据写入路径
+    await store.append_ui_message(
+        session["thread_id"], "assistant", "这是答案",
+        tool_steps=[{"tool": "get_weather", "label": "查询天气", "status": "done"}],
+    )
+
+    messages = await store.list_ui_messages(session["thread_id"])
+
+    assert messages[0]["segments"] == [
+        {"kind": "tool", "tool": "get_weather", "label": "查询天气", "status": "done"},
+        {"kind": "text", "text": "这是答案"},
     ]

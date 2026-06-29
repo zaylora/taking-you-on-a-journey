@@ -51,6 +51,7 @@ class SessionStore:
                   content TEXT NOT NULL,
                   kind TEXT NOT NULL DEFAULT 'text',
                   tool_steps TEXT NOT NULL DEFAULT '[]',
+                  segments TEXT NOT NULL DEFAULT '[]',
                   created_at TEXT NOT NULL,
                   FOREIGN KEY(thread_id) REFERENCES session_meta(thread_id)
                 )
@@ -62,6 +63,13 @@ class SessionStore:
                 ON session_messages(thread_id, id)
                 """
             )
+            # 幂等迁移：旧库 session_messages 无 segments 列时补列（SQLite 支持 ADD COLUMN）
+            cursor = await db.execute("PRAGMA table_info(session_messages)")
+            cols = [row[1] for row in await cursor.fetchall()]
+            if "segments" not in cols:
+                await db.execute(
+                    "ALTER TABLE session_messages ADD COLUMN segments TEXT NOT NULL DEFAULT '[]'"
+                )
             await db.commit()
 
     async def create_session(self, title: str = DEFAULT_TITLE) -> dict:
@@ -155,13 +163,15 @@ class SessionStore:
         *,
         kind: str = "text",
         tool_steps: list[dict] | None = None,
+        segments: list[dict] | None = None,
     ) -> None:
         now = _now_iso()
         async with aiosqlite.connect(self.db_path) as db:
             await db.execute(
                 """
-                INSERT INTO session_messages (thread_id, role, content, kind, tool_steps, created_at)
-                VALUES (?, ?, ?, ?, ?, ?)
+                INSERT INTO session_messages
+                  (thread_id, role, content, kind, tool_steps, segments, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     thread_id,
@@ -169,6 +179,7 @@ class SessionStore:
                     content,
                     kind,
                     json.dumps(tool_steps or [], ensure_ascii=False),
+                    json.dumps(segments or [], ensure_ascii=False),
                     now,
                 ),
             )
@@ -179,7 +190,7 @@ class SessionStore:
             db.row_factory = aiosqlite.Row
             rows = await db.execute_fetchall(
                 """
-                SELECT role, content, kind, tool_steps
+                SELECT role, content, kind, tool_steps, segments
                 FROM session_messages
                 WHERE thread_id = ?
                 ORDER BY id ASC
@@ -192,10 +203,23 @@ class SessionStore:
                 tool_steps = json.loads(row["tool_steps"] or "[]")
             except json.JSONDecodeError:
                 tool_steps = []
+            try:
+                segments = json.loads(row["segments"] or "[]")
+            except json.JSONDecodeError:
+                segments = []
+            if not segments:
+                # 旧数据降级：工具段在前（done），正文段在后
+                segments = [
+                    {"kind": "tool", "tool": s.get("tool"), "label": s.get("label"), "status": "done"}
+                    for s in tool_steps
+                ]
+                if row["content"]:
+                    segments.append({"kind": "text", "text": row["content"]})
             messages.append({
                 "role": row["role"],
                 "content": row["content"],
                 "kind": row["kind"],
                 "tool_steps": tool_steps,
+                "segments": segments,
             })
         return messages
