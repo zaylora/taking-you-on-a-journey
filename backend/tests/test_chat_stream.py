@@ -429,3 +429,120 @@ async def test_sse_events_persists_interleaved_segments(tmp_path):
         {"kind": "text", "text": "成都行程如下。"},
     ]
 
+
+# ---------------------------------------------------------------------------
+# 回填路径：graph 有历史但 SQLite UI 表为空 → 发新消息触发回填 → prior 轮
+# 落库的 segments 是交错结构（含 tool 段），不是空列表或降级形态。
+# ---------------------------------------------------------------------------
+
+class _FakeGraphWithInterleavedHistory:
+    """prior state 包含带 tool_calls 的 AIMessage + 文本 AIMessage（交错）。
+
+    aget_state_history 暴露历史快照，reconstruct_messages_from_graph_history
+    会优先用它；若桩没有该方法则 fallback 到 latest_values 也能走到 build_segments。
+    astream_events 只产出最简新一轮，避免干扰断言。
+    """
+
+    def __init__(self):
+        self._state_calls = 0
+        # prior state：一个有 tool_calls 的 AIMessage + 一个文本 AIMessage
+        self._prior_messages = [
+            HumanMessage(content="帮我查成都天气"),
+            AIMessage(
+                content="我先查一下天气。",
+                tool_calls=[{"name": "get_weather", "args": {"city": "成都"}, "id": "c0"}],
+            ),
+            # ToolMessage 会被 build_segments 跳过（不影响 segments 结构）
+            AIMessage(content="成都今天晴，适合出行。"),
+        ]
+
+    async def aget_state(self, _config):
+        self._state_calls += 1
+        if self._state_calls == 1:
+            # prior 阶段（回填检查）
+            return SimpleNamespace(values={
+                "messages": self._prior_messages,
+                "xhs_sources": [],
+            })
+        # 新一轮结束后的 snap
+        return SimpleNamespace(values={
+            "messages": self._prior_messages + [
+                HumanMessage(content="新问题"),
+                AIMessage(content="新答案"),
+            ],
+            "xhs_sources": [],
+            "day_plans": [],
+            "budget_check": {},
+            "plan_version": 0,
+            "changed_days": [],
+        })
+
+    async def aget_state_history(self, _config):
+        # 返回单个历史快照（newest-first，这里只有一个）
+        yield SimpleNamespace(values={
+            "messages": self._prior_messages,
+            "xhs_sources": [],
+        })
+
+    async def astream_events(self, _stream_input, *, config, version):
+        yield {"event": "on_chat_model_stream", "data": {"chunk": AIMessageChunk(content="新答案")}}
+
+
+@pytest.mark.anyio
+async def test_sse_events_backfill_preserves_interleaved_segments(tmp_path):
+    """回填路径保留交错 segments 回归测试。
+
+    断言推导：
+    - prior_messages 包含：AIMessage(content="我先查一下天气。", tool_calls=[get_weather]) +
+      AIMessage(content="成都今天晴，适合出行。")
+    - reconstruct_messages_from_graph_history → reconstruct_messages_from_history →
+      segments_for_assistant(prior_messages) → build_segments 产出：
+        [text("我先查一下天气。"), tool(get_weather, done), text("成都今天晴，适合出行。")]
+    - 修复前：append_ui_message 没传 segments，落库空 []，list_ui_messages 降级合成
+        [tool(get_weather,done), text("成都今天晴，适合出行。")]（tools-first，顺序错误）
+    - 修复后：传 segments，落库保真，list_ui_messages 直接返回交错结构。
+    """
+    store = SessionStore(str(tmp_path / "sessions.sqlite"))
+    await store.setup()
+    session = await store.create_session()
+
+    async def _is_disconnected():
+        return False
+
+    request = SimpleNamespace(
+        app=SimpleNamespace(
+            state=SimpleNamespace(graph=_FakeGraphWithInterleavedHistory(), session_store=store)
+        ),
+        is_disconnected=_is_disconnected,
+    )
+
+    [event async for event in sse_events("新问题", session["thread_id"], request)]
+
+    messages = await store.list_ui_messages(session["thread_id"])
+    # 0: user prior, 1: assistant prior (回填), 2: user new, 3: assistant new
+    roles = [m["role"] for m in messages]
+    assert "assistant" in roles, "应有 assistant 消息"
+
+    # 找 prior 那条 assistant 消息（第一条 assistant）
+    prior_assistant = next(m for m in messages if m["role"] == "assistant")
+    segs = prior_assistant["segments"]
+
+    # 必须非空
+    assert segs, "prior assistant segments 不应为空列表"
+
+    # 必须包含至少一个 tool 段
+    tool_segs = [s for s in segs if s.get("kind") == "tool"]
+    assert tool_segs, "prior assistant segments 应包含 tool 段"
+    assert tool_segs[0]["tool"] == "get_weather"
+
+    # 必须包含至少一个 text 段
+    text_segs = [s for s in segs if s.get("kind") == "text"]
+    assert text_segs, "prior assistant segments 应包含 text 段"
+
+    # 交错顺序：text 段在 tool 段之前（来自 "我先查一下天气。"）
+    first_text_idx = next(i for i, s in enumerate(segs) if s.get("kind") == "text")
+    first_tool_idx = next(i for i, s in enumerate(segs) if s.get("kind") == "tool")
+    assert first_text_idx < first_tool_idx, (
+        f"期望 text 段先于 tool 段（交错），实际 segments={segs}"
+    )
+

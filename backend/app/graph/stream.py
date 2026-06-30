@@ -97,6 +97,7 @@ async def sse_events(message: str, thread_id: str | None, request):
                     prior_message.get("content", ""),
                     kind=prior_message.get("kind", "text"),
                     tool_steps=prior_message.get("tool_steps", []),
+                    segments=prior_message.get("segments"),
                 )
 
         async for ev in graph.astream_events(stream_input, config=config, version="v2"):

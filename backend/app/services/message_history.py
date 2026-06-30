@@ -126,7 +126,13 @@ def aggregate_messages(messages) -> list[dict]:
                     )
         elif isinstance(message, BaseMessage):
             current_ai = None
-            result.append({"role": message.type, "content": extract_content(message), "kind": "text"})
+            content = extract_content(message)
+            result.append({
+                "role": message.type,
+                "content": content,
+                "kind": "text",
+                "segments": [{"kind": "text", "text": content}] if content else [],
+            })
         elif isinstance(message, dict):
             current_ai = None
             raw = message.get("content", "")
@@ -135,10 +141,18 @@ def aggregate_messages(messages) -> list[dict]:
                 "role": message.get("role", "assistant"),
                 "content": content,
                 "kind": message.get("kind", "text"),
+                "segments": message.get("segments") if message.get("segments") is not None
+                    else ([{"kind": "text", "text": content}] if content else []),
             })
         else:
             current_ai = None
-            result.append({"role": "assistant", "content": str(message), "kind": "text"})
+            content = str(message)
+            result.append({
+                "role": "assistant",
+                "content": content,
+                "kind": "text",
+                "segments": [{"kind": "text", "text": content}] if content else [],
+            })
     return result
 
 
