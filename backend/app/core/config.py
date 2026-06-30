@@ -70,6 +70,11 @@ class Settings(BaseSettings):
     # LangGraph SQLite checkpointer + 本地匿名会话元数据。
     checkpoint_db_path: str = "./data/checkpoints.sqlite"
 
+    # 大工具结果落盘：超过阈值时只把预览放进上下文，完整结果写入本地文件。
+    tool_result_storage_dir: str = "./data/tool_results"
+    tool_result_persist_threshold_chars: int = 20_000
+    tool_result_preview_chars: int = 2_000
+
     def active_api_key(self) -> str:
         """返回当前 provider 的明文 Key（仅供启动校验/构造 SDK 用，勿记日志）。"""
         if self.llm_provider == "anthropic":

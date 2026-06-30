@@ -4,6 +4,7 @@ from app.agent.tools.budget import compute_budget_tool, finalize_plan
 from app.agent.tools.clarify import ask_clarification
 from app.agent.tools.itinerary import assemble_itinerary
 from app.agent.tools.lodging import assign_hotels
+from app.agent.tools.persisted_result import read_persisted_tool_result
 from app.agent.tools.time import get_current_time
 from app.agent.tools.trip import (
     get_weather, plan_route, search_attractions, search_restaurants,
@@ -21,6 +22,7 @@ __all__ = [
     "plan_route",
     "assemble_itinerary",
     "assign_hotels",
+    "read_persisted_tool_result",
     "compute_budget_tool",
     "finalize_plan",
     "ask_clarification",
