@@ -3,7 +3,7 @@
     <div v-if="clarify" class="clarify-panel">
       <div class="clarify-head">
         <span class="clarify-question">{{ clarify.question }}</span>
-        <el-icon class="clarify-close" @click="close"><Close /></el-icon>
+        <el-icon class="clarify-close" role="button" tabindex="0" aria-label="关闭" @click="close" @keydown.enter="close"><Close /></el-icon>
       </div>
       <div class="clarify-options">
         <el-button
