@@ -17,6 +17,8 @@ import { ref, computed, watch, onMounted, onBeforeUnmount } from 'vue'
 import { MapLocation, Warning } from '@element-plus/icons-vue'
 import { useTripStore } from '../stores/trip'
 import { useAMap } from '../composables/useAMap'
+import { buildOverviewLegs } from '../utils/overviewRoute'
+import { enqueueRouteTask } from '../utils/routeScheduler'
 
 const tripStore = useTripStore()
 const mapContainer = ref<HTMLElement | null>(null)
@@ -38,7 +40,7 @@ const updateOverviewRoute = () => {
     amap.clearOverviewRoute()
   } else {
     if (tripStore.activeDay === null) {
-      amap.drawOverviewRoute(buildOverviewLegs(tripStore.dayPlans))
+      amap.drawOverviewRoute(buildOverviewLegs(tripStore.dayPlans, true))
     } else {
       const currentDayPlan = tripStore.dayPlans.find(dp => dp.day === tripStore.activeDay)
       if (currentDayPlan) amap.drawOverviewRoute(buildOverviewLegs([currentDayPlan]))
@@ -145,52 +147,21 @@ const updateMarkerVisibility = () => {
   }
 }
 
-// 校验经纬度有效（存在、为数字、非 (0,0) 占位坐标）。
-const validLoc = (loc: any) =>
-  loc && typeof loc.lng === 'number' && typeof loc.lat === 'number' && (loc.lng !== 0 || loc.lat !== 0)
-
-// 把若干天的行程拆成「分段总览路线」：按当天实体点（景点/餐饮，末尾追加酒店）的生成顺序
-// 相邻两两连一条 leg，由高德按 mode 规划真实路网路线。
-// transport 段不再作为画线依据（景点间常无 transport 段），而是把它的 mode 吸附到其后那段连线上；
-// 缺省 mode 由高德按驾车规划。开头的城际段（起点为外地、无坐标）因前面没有实体点而自然排除。
-const buildOverviewLegs = (plans: any[]) => {
-  const legs: Array<{ start: any; end: any; mode?: string }> = []
-  for (const dp of plans) {
-    const stops: Array<{ loc: any; mode: string }> = []
-    let pendingMode = ''
-    for (const item of dp.items) {
-      if (item.type === 'transport') {
-        if (item.mode) pendingMode = item.mode
-        continue
-      }
-      if (validLoc(item.location)) {
-        stops.push({ loc: item.location, mode: pendingMode })
-        pendingMode = ''
-      }
-    }
-    if (dp.hotel && validLoc(dp.hotel.location)) {
-      stops.push({ loc: dp.hotel.location, mode: pendingMode })
-    }
-    for (let i = 0; i + 1 < stops.length; i++) {
-      legs.push({ start: stops[i].loc, end: stops[i + 1].loc, mode: stops[i + 1].mode })
-    }
-  }
-  return legs
-}
-
 const prefetchRouteInfos = async () => {
-  for (const dp of tripStore.dayPlans) {
-    for (const item of dp.items) {
-      if (item.type === 'transport' && !item.routeInfo) {
-        const { startLoc, endLoc } = getTransportLocations(item)
-        if (startLoc && endLoc) {
-          const info = await amap.fetchRouteInfo(startLoc, endLoc, item.mode)
-          if (info) item.routeInfo = info
-          await new Promise(r => setTimeout(r, 200)) // 防高并发
+  await enqueueRouteTask(async () => {
+    for (const dp of tripStore.dayPlans) {
+      for (const item of dp.items) {
+        if (item.type === 'transport' && !item.routeInfo) {
+          const { startLoc, endLoc } = getTransportLocations(item)
+          if (startLoc && endLoc) {
+            const info = await amap.fetchRouteInfo(startLoc, endLoc, item.mode)
+            if (info) item.routeInfo = info
+            await new Promise(r => setTimeout(r, 250))
+          }
         }
       }
     }
-  }
+  })
 }
 
 // 预取也改挂在地图指纹上：只有点位变化（新行程/改点）才重新预取，

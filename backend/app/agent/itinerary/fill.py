@@ -25,6 +25,16 @@ def _fmt(minutes: int) -> str:
     return f"{minutes // 60:02d}:{minutes % 60:02d}"
 
 
+def _parse_time(value: str) -> int | None:
+    if not value:
+        return None
+    try:
+        hour, minute = value.split(":", 1)
+        return int(hour) * 60 + int(minute)
+    except (TypeError, ValueError):
+        return None
+
+
 def _distance2(a: dict[str, Any], b: dict[str, Any]) -> float:
     alng = float(a.get("lng", a.get("location", {}).get("lng", 0.0)) or 0.0)
     alat = float(a.get("lat", a.get("location", {}).get("lat", 0.0)) or 0.0)
@@ -91,6 +101,36 @@ def _transport_item(
     }
 
 
+def _shift_item_time(item: dict[str, Any], start: int) -> dict[str, Any]:
+    """按原持续时长平移行程项时间，避免交通段与停靠点重叠。"""
+    old_start = _parse_time(item.get("start", ""))
+    old_end = _parse_time(item.get("end", ""))
+    duration = max(0, (old_end or start) - (old_start or start))
+    return {
+        **item,
+        "start": _fmt(start),
+        "end": _fmt(start + duration),
+    }
+
+
+def _append_with_transport(
+    items: list[dict[str, Any]],
+    item: dict[str, Any],
+    current: int,
+    budget_mode: bool = False,
+) -> int:
+    """把真实停靠点接到时间线末尾，并返回该停靠点结束时间。"""
+    item_to_append = item
+    if items:
+        items.append(_transport_item(items[-1], item, current, budget_mode=budget_mode))
+        current += 25
+        item_start = _parse_time(item.get("start", ""))
+        if item_start is None or item_start < current:
+            item_to_append = _shift_item_time(item, current)
+    items.append(item_to_append)
+    return _parse_time(item_to_append.get("end", "")) or current
+
+
 def _attraction_item(
     item: dict[str, Any],
     start: int,
@@ -139,14 +179,12 @@ def fill_day_plans(
         attractions = [item for item in day_plan.get("items", []) if item.get("type") == "attraction"]
 
         for idx, attraction in enumerate(attractions):
-            if idx > 0:
-                filled_items.append(
-                    _transport_item(filled_items[-1], attraction, current, budget_mode=budget_mode)
-                )
-                current += 25
-
-            filled_items.append(_attraction_item(attraction, current, rainy))
-            current += 90
+            current = _append_with_transport(
+                filled_items,
+                _attraction_item(attraction, current, rainy),
+                current,
+                budget_mode=budget_mode,
+            )
 
             should_insert_lunch = idx == 0 and len(attractions) > 1
             should_insert_dinner = idx == len(attractions) - 1 and current >= 17 * 60
@@ -155,8 +193,12 @@ def fill_day_plans(
                 if restaurant:
                     used_restaurant_ids.add(restaurant.get("poi_id", restaurant.get("name", "")))
                     meal_start = max(current, 12 * 60) if should_insert_lunch else max(current, 18 * 60)
-                    filled_items.append(_meal_item(restaurant, meal_start, budget_mode=budget_mode))
-                    current = meal_start + 60
+                    current = _append_with_transport(
+                        filled_items,
+                        _meal_item(restaurant, meal_start, budget_mode=budget_mode),
+                        current,
+                        budget_mode=budget_mode,
+                    )
 
         center = daily_centers[day_index] if day_index < len(daily_centers) else {"lng": 0.0, "lat": 0.0}
         plans.append({

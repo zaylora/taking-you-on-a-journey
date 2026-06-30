@@ -1,6 +1,8 @@
 import { ref, type Ref } from 'vue'
 import AMapLoader from '@amap/amap-jsapi-loader'
 import type { DayPlan, LngLat, TripItem, Hotel } from '../types'
+import { isAmapQuotaLimit } from '../utils/amapErrors'
+import { enqueueRouteTask, runSequentially } from '../utils/routeScheduler'
 
 // 按天配色（循环使用）
 const DAY_COLORS = ['#409EFF', '#67C23A', '#E6A23C', '#F56C6C', '#909399', '#9B59B6']
@@ -194,8 +196,22 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     overviewGeneration++
     for (const instance of overviewRouteInstances) {
       if (instance && instance.clear) instance.clear()
+      else if (map && instance) map.remove(instance)
     }
     overviewRouteInstances = []
+  }
+
+  const drawFallbackLine = (start: LngLat, end: LngLat, generation: number) => {
+    if (!map || !AMap || generation !== overviewGeneration) return
+    const line = new AMap.Polyline({
+      path: [[start.lng, start.lat], [end.lng, end.lat]],
+      strokeColor: '#409EFF',
+      strokeWeight: 5,
+      strokeOpacity: 0.55,
+      strokeStyle: 'dashed',
+    })
+    map.add(line)
+    overviewRouteInstances.push(line)
   }
 
   // 总览路线按段绘制：每段交通用自己的 mode 规划（步行/公交/驾车），
@@ -205,17 +221,20 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
     clearOverviewRoute()
     const myGen = overviewGeneration
 
-    for (const leg of legs) {
+    const searchLeg = async (leg: { start: LngLat; end: LngLat; mode?: string }) => {
       const { start, end } = leg
       const mode = leg.mode || ''
-      if (!start || !end || typeof start.lng !== 'number' || typeof end.lng !== 'number') continue
+      if (!start || !end || typeof start.lng !== 'number' || typeof end.lng !== 'number') return
 
       let PluginClass = AMap.Driving
       const pluginOptions: any = { map, hideMarkers: true, showTraffic: false, autoFitView: false }
 
-      const execSearch = () => {
+      const execSearch = () => new Promise<void>((resolve) => {
         // 公交城市异步返回时，本次总览可能已被新的清除/重绘取代
-        if (myGen !== overviewGeneration) return
+        if (myGen !== overviewGeneration) {
+          resolve()
+          return
+        }
         try {
           const instance = new PluginClass(pluginOptions)
           overviewRouteInstances.push(instance)
@@ -226,30 +245,46 @@ export function useAMap(containerRef: Ref<HTMLElement | null>) {
               // 迟到的孤儿回调：本次绘制已被新的清除/重绘取代，抹掉它刚渲染的路线后退出
               if (myGen !== overviewGeneration) {
                 instance.clear()
+                resolve()
                 return
               }
               if (status !== 'complete') {
+                drawFallbackLine(start, end, myGen)
+                if (isAmapQuotaLimit(result)) {
+                  resolve()
+                  return
+                }
                 console.warn('总览分段路线规划异常:', result)
               }
+              resolve()
             }
           )
         } catch (e) {
           console.error('总览分段路线绘制异常:', e)
+          resolve()
         }
-      }
+      })
 
       if (mode.includes('公交') || mode.includes('地铁')) {
         PluginClass = AMap.Transfer
         // 高德公交规划必须指定城市，动态获取当前地图中心所在城市
-        map.getCity((info: any) => {
-          pluginOptions.city = info.city || info.province || '深圳市'
-          execSearch()
+        await new Promise<void>((resolve) => {
+          map.getCity((info: any) => {
+            pluginOptions.city = info.city || info.province || '深圳市'
+            execSearch().then(resolve)
+          })
         })
       } else {
         if (mode.includes('步行')) PluginClass = AMap.Walking
-        execSearch()
+        await execSearch()
       }
     }
+
+    enqueueRouteTask(() => runSequentially(
+      legs,
+      searchLeg,
+      { shouldContinue: () => myGen === overviewGeneration, delayMs: 250 },
+    ))
   }
 
   const clearRoute = () => {
