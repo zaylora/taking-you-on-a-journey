@@ -97,6 +97,10 @@ def build_tool_label(name: str | None, args: Mapping[str, Any] | None = None) ->
     if tool_name == "xhs_status":
         return "检查小红书登录状态"
 
+    if tool_name == "read_persisted_tool_result":
+        result_id = _first_text(tool_args, "result_id")
+        return "读取落盘工具结果" + (f"：{result_id}" if result_id else "")
+
     if tool_name == "search_attractions":
         city = _first_text(tool_args, "city")
         keywords = _first_text(tool_args, "keywords")

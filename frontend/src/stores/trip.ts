@@ -1,7 +1,8 @@
 import { defineStore } from 'pinia'
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { createSession, getSession, listSessions } from '../api/sessions'
 import type { DayPlan, Budget, TripItem, SessionSnapshot, ClarifyPayload, Segment } from '../types'
+import { normalizeDayPlanTransports } from '../utils/dayPlanConnectivity'
 
 export interface Message {
   role: 'user' | 'assistant'
@@ -89,7 +90,7 @@ export const useTripStore = defineStore('trip', () => {
             ? m.segments.map((s) => s.kind === 'tool' ? { ...s, status: 'done' as const } : s)
             : undefined,
         })),
-      dayPlans: snapshot.day_plans || [],
+      dayPlans: normalizeDayPlanTransports(snapshot.day_plans || []),
       budget: budgetFromSnapshot(snapshot),
       activeDay: snapshot.day_plans?.[0]?.day ?? null,
       activePoiId: null,
@@ -224,7 +225,7 @@ export const useTripStore = defineStore('trip', () => {
   const setDayPlans = (plans: DayPlan[]) => {
     const current = activeConversation.value
     if (!current) return
-    current.dayPlans = plans
+    current.dayPlans = normalizeDayPlanTransports(plans)
     if (plans.length > 0) {
       current.activeDay = null
       current.activePoiId = null
@@ -269,6 +270,16 @@ export const useTripStore = defineStore('trip', () => {
   const touchActive = () => {
     if (activeConversation.value) activeConversation.value.updatedAt = new Date().toISOString()
   }
+
+  watch(
+    activeConversation,
+    (conversation) => {
+      if (conversation?.dayPlans.length) {
+        conversation.dayPlans = normalizeDayPlanTransports(conversation.dayPlans)
+      }
+    },
+    { immediate: true },
+  )
 
   return {
     conversations, activeThreadId, activeConversation,

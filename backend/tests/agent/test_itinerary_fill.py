@@ -84,6 +84,58 @@ def test_fill_day_plans_does_not_invent_restaurants_when_candidates_empty():
     assert out[0]["items"][0]["name"] == "清晖园"
 
 
+def test_fill_day_plans_adds_transport_between_attraction_and_meal():
+    skeleton = [{
+        "day": 1,
+        "items": [
+            {
+                "type": "attraction",
+                "name": "大佛寺",
+                "poi_id": "p1",
+                "location": {"lng": 113.2708, "lat": 23.1247},
+                "start": "",
+                "end": "",
+                "indoor": False,
+                "note": "",
+                "cost": 0.0,
+            },
+            {
+                "type": "attraction",
+                "name": "永庆坊",
+                "poi_id": "p2",
+                "location": {"lng": 113.2440, "lat": 23.1156},
+                "start": "",
+                "end": "",
+                "indoor": False,
+                "note": "",
+                "cost": 0.0,
+            },
+        ],
+    }]
+    restaurants = [{"name": "银记肠粉(北京路店)", "poi_id": "r1", "lng": 113.2705, "lat": 23.1239}]
+
+    out = fill_day_plans(
+        skeleton=skeleton,
+        restaurants=restaurants,
+        weather={},
+        daily_centers=[{"lng": 113.2574, "lat": 23.1201}],
+    )
+
+    items = out[0]["items"]
+    pairs = [(item.get("from"), item.get("to")) for item in items if item["type"] == "transport"]
+    assert pairs == [
+        ("大佛寺", "银记肠粉(北京路店)"),
+        ("银记肠粉(北京路店)", "永庆坊"),
+    ]
+    assert [(item["type"], item["name"], item["start"], item["end"]) for item in items] == [
+        ("attraction", "大佛寺", "09:30", "11:00"),
+        ("transport", "", "11:00", "11:25"),
+        ("meal", "银记肠粉(北京路店)", "12:00", "13:00"),
+        ("transport", "", "13:00", "13:25"),
+        ("attraction", "永庆坊", "13:25", "14:55"),
+    ]
+
+
 def test_merge_safe_notes_only_updates_matching_notes():
     base = [{
         "day": 1,

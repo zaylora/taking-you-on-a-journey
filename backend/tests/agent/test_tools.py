@@ -109,6 +109,7 @@ def test_xhs_tools_are_registered_with_agent():
         "xhs_note_comments",
         "xhs_hot_notes",
         "xhs_user_profile",
+        "read_persisted_tool_result",
     } <= tool_names
 
 
@@ -338,6 +339,75 @@ async def test_xhs_read_note_adds_image_analysis_without_changing_envelope(monke
     assert out["meta"]["image_analysis"]["attempted"] is True
     assert out["meta"]["image_analysis"]["image_count"] == 1
     assert calls == [["read", "note-1"]]
+
+
+@pytest.mark.asyncio
+async def test_xhs_read_note_persists_large_result(monkeypatch, tmp_path):
+    async def _fake_run(args):
+        return {"ok": True, "data": {"content": "顺德攻略" * 200}}
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+    monkeypatch.setenv("TOOL_RESULT_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("TOOL_RESULT_PERSIST_THRESHOLD_CHARS", "100")
+    monkeypatch.setenv("TOOL_RESULT_PREVIEW_CHARS", "40")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    out = await tools.xhs_read_note.ainvoke({
+        "target": "note-1",
+        "analyze_images": False,
+    })
+    get_settings.cache_clear()
+
+    assert out["ok"] is True
+    assert out["persisted"] is True
+    assert out["tool_name"] == "xhs_read_note"
+    assert len(out["preview"]) <= 40
+    assert (tmp_path / out["result_id"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_xhs_comments_all_persists_large_result(monkeypatch, tmp_path):
+    async def _fake_run(args):
+        return {"ok": True, "data": {"comments": [{"content": "排队很久" * 300}]}}
+
+    monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
+    monkeypatch.setenv("TOOL_RESULT_STORAGE_DIR", str(tmp_path))
+    monkeypatch.setenv("TOOL_RESULT_PERSIST_THRESHOLD_CHARS", "100")
+    monkeypatch.setenv("TOOL_RESULT_PREVIEW_CHARS", "40")
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    out = await tools.xhs_note_comments.ainvoke({
+        "target": "note-1",
+        "include_all": True,
+    })
+    get_settings.cache_clear()
+
+    assert out["ok"] is True
+    assert out["persisted"] is True
+    assert out["tool_name"] == "xhs_note_comments"
+    assert (tmp_path / out["result_id"]).exists()
+
+
+@pytest.mark.asyncio
+async def test_read_persisted_tool_result_tool_reads_slice(monkeypatch, tmp_path):
+    result_id = "xhs_read_note-call_read.json"
+    (tmp_path / result_id).write_text("0123456789", encoding="utf-8")
+    monkeypatch.setenv("TOOL_RESULT_STORAGE_DIR", str(tmp_path))
+    from app.core.config import get_settings
+    get_settings.cache_clear()
+
+    out = await tools.read_persisted_tool_result.ainvoke({
+        "result_id": result_id,
+        "offset": 2,
+        "limit": 5,
+    })
+    get_settings.cache_clear()
+
+    assert out["ok"] is True
+    assert out["content"] == "23456"
+    assert out["has_more"] is True
 
 
 @pytest.mark.asyncio

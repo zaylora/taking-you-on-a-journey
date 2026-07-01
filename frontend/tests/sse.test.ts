@@ -92,8 +92,18 @@ test('renders SSE error events into the active conversation', async () => {
   await send('安排住宿')
 
   expect(store.messages).toEqual([
-    { role: 'user', content: '安排住宿', kind: 'text' },
-    { role: 'assistant', content: '生成失败，请重试', kind: 'error' },
+    {
+      role: 'user',
+      content: '安排住宿',
+      kind: 'text',
+      segments: [{ kind: 'text', text: '安排住宿' }],
+    },
+    {
+      role: 'assistant',
+      content: '生成失败，请重试',
+      kind: 'error',
+      segments: [{ kind: 'text', text: '生成失败，请重试' }],
+    },
   ])
   expect(toastError).toHaveBeenCalledWith('生成失败，请重试')
 })
