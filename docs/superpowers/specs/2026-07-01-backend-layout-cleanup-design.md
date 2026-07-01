@@ -34,6 +34,8 @@
 
 新建这四个文件只会得到空壳（新冗余），违反 YAGNI 与 AGENTS.md「依赖优先原则」。改为在 `backend/AGENTS.md` 写清上表映射。
 
+> 概念区分：骨架 `router.py` 指 **tool routing**（决定调哪个工具），由 `create_agent` 内建，不手写；本项目 `tools/registry.py` 做的是 **工具编目**（集中声明工具清单并暴露给组装），两者不是一回事，registry 不承担运行时路由。
+
 ### 1.4 明确不做（防过度工程）
 
 - 不加 `middleware/` / `models/` / `repositories/` / `db/` / `queue/` / `memory/long_term`：无近期需求，加了即空壳。保留为「未来北极星」。
@@ -50,7 +52,8 @@ backend/app/
 │   ├── chat_stream.py          # ← 原 graph/stream.py（SSE 桥接层）
 │   └── sessions.py             # 不变
 ├── tools/                      # 能力层大伞（新顶层）
-│   ├── __init__.py             # 聚合并对 agent 暴露 @tool 清单
+│   ├── __init__.py             # 暴露注册中心（from registry import ALL_TOOLS）
+│   ├── registry.py             # 工具注册中心：集中声明 @tool 清单（ALL_TOOLS）
 │   ├── actions/                # ← 原 agent/tools/：@tool（agent 直接调用）
 │   │   ├── __init__.py
 │   │   ├── budget.py / clarify.py / itinerary.py / lodging.py
@@ -106,11 +109,11 @@ backend/app/
 | `utils/amap.py`、`utils/__init__.py` | `tools/clients/amap.py`、`tools/clients/__init__.py` |
 | 新建 `tools/__init__.py`（聚合层，见下） | — |
 
-**`tools/__init__.py`**（复制原 `agent/tools/__init__.py`，import 源改为 `app.tools.actions.*`）：
+**`tools/registry.py`**（新建，工具注册中心——集中 import 原 `agent/tools/__init__.py` 的 @tool 并声明清单，import 源改为 `app.tools.actions.*`）：
 
 ```python
 # -*- coding: utf-8 -*-
-"""ReAct Agent tool exports."""
+"""工具注册中心：集中声明所有 @tool，统一暴露给 agent 组装。新增工具在此登记一处。"""
 from app.tools.actions.budget import compute_budget_tool, finalize_plan
 from app.tools.actions.clarify import ask_clarification
 from app.tools.actions.itinerary import assemble_itinerary
@@ -125,14 +128,27 @@ from app.tools.actions.xhs import (
     xhs_search_notes, xhs_status, xhs_user_profile,
 )
 
-__all__ = [
-    "get_current_time", "search_attractions", "search_restaurants", "get_weather",
-    "plan_route", "assemble_itinerary", "assign_hotels", "read_persisted_tool_result",
-    "compute_budget_tool", "finalize_plan", "ask_clarification", "xhs_status",
-    "research_xhs_travel_guide", "xhs_search_notes", "xhs_read_note",
-    "xhs_note_comments", "xhs_hot_notes", "xhs_user_profile",
+# agent 组装时的完整工具清单（顺序沿用原 build.py 的 _TOOLS，行为不变）。
+ALL_TOOLS = [
+    get_current_time, search_attractions, search_restaurants, get_weather, plan_route,
+    assemble_itinerary, assign_hotels, compute_budget_tool, finalize_plan,
+    ask_clarification, read_persisted_tool_result,
+    xhs_status, research_xhs_travel_guide, xhs_search_notes, xhs_read_note,
+    xhs_note_comments, xhs_hot_notes, xhs_user_profile,
 ]
 ```
+
+**`tools/__init__.py`**（新建，能力域入口，对外暴露注册中心）：
+
+```python
+# -*- coding: utf-8 -*-
+"""tools 能力域入口：从注册中心暴露工具清单。"""
+from app.tools.registry import ALL_TOOLS
+
+__all__ = ["ALL_TOOLS"]
+```
+
+**`agent/build.py`：用注册中心消除 `_TOOLS` 双写冗余**。删除原第 14-29 行的 18 个工具 import 块与 `_TOOLS = [...]` 列表，替换为 `from app.tools import ALL_TOOLS`；`create_agent(...)` 的 `tools=_TOOLS` 改为 `tools=ALL_TOOLS`。其余（`prompt` / `state` / `time_context` / `llm.factory` 的 import 与 middleware 逻辑）不变。
 
 **`tools/actions/*` 内部 import 重接**：
 
@@ -157,7 +173,7 @@ __all__ = [
 | `planning/fill.py:12` | `from app.agent.itinerary.schemas import DayPlans` | `from app.tools.planning.schemas import DayPlans` |
 | `planning/routing/matrix.py:10` | `from app.utils import amap` | `from app.tools.clients import amap` |
 
-**`agent/build.py:14`**：`from app.agent.tools import (...)` → `from app.tools import (...)`（导入的 @tool 名不变）。
+**`agent/build.py`** 的 tools 引用改动见上「用注册中心消除 `_TOOLS` 双写冗余」段。
 
 ### 3.3 测试引用同步（提交②内，最易漏，逐一列出）
 
