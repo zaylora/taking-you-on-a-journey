@@ -48,12 +48,12 @@ backend/app/
 │   └── sessions.py         # 不变
 ├── tools/                  # ← 原 agent/tools/（显化为顶层能力层）
 │   ├── __init__.py
-│   ├── result_storage.py   # ← 原 agent/tool_result_storage.py（纯服务工具落盘，随 tools 迁移）
 │   ├── budget.py / clarify.py / itinerary.py / lodging.py
 │   ├── persisted_result.py / time.py / trip.py / xhs.py / utils.py
-├── agent/                  # 「大脑」：仅保留框架组装与大脑资产
+├── agent/                  # 「大脑」：保留框架组装、大脑资产与基建
 │   ├── build.py            # ← 吸收 make_graph / build_graph；组装 create_agent
 │   ├── state.py / prompt.py / reducers.py / time_context.py
+│   ├── tool_result_storage.py  # 大工具结果落盘基建（tools 依赖它，方向 tools→agent）
 │   └── itinerary/          # 纯计算编排算法（预算/路线/聚类/diff），不变
 ├── clients/                # ← 原 utils/（正名）
 │   └── amap.py
@@ -62,7 +62,7 @@ backend/app/
 
 `graph/` 与 `utils/` 目录删除。
 
-**依赖方向说明**：`app.tools.*` 会 import `app.agent.itinerary`（编排算法）、`app.agent.prompt`（如 `XHS_RESEARCH_SYS`）、`app.agent.time_context`（`current_time_payload`）。即能力层依赖大脑层的算法与资产，方向为 `tools → agent`，可接受。`agent/build.py` 反向 import `app.tools`（工具清单），二者不构成循环（build 只在组装期引用 tools，tools 不引用 build）。
+**依赖方向说明**：`app.tools.*` 会 import `app.agent.itinerary`（编排算法）、`app.agent.prompt`（如 `XHS_RESEARCH_SYS`）、`app.agent.time_context`（`current_time_payload`）、`app.agent.tool_result_storage`（落盘基建）。即能力层依赖大脑层的算法、资产与基建，方向为 `tools → agent`，可接受。`agent/build.py` 反向 import `app.tools`（工具清单），二者不构成循环（build 只在组装期引用 tools，tools 不引用 build）。
 
 ## 3. 改动清单
 
@@ -91,9 +91,7 @@ backend/app/
 | 动作 | 文件 |
 |---|---|
 | `agent/tools/` 整个目录移动 → `app/tools/`（含 9 个工具模块 + `utils.py` + `__init__.py`，内容不变） | `app/tools/` |
-| `agent/tool_result_storage.py` → `app/tools/result_storage.py`（纯服务工具落盘，随 tools 内聚） | `app/tools/result_storage.py` |
-| tools 内部对 `app.agent.tool_result_storage` 的 import 改指 `app.tools.result_storage` | `tools/xhs.py:15`、`tools/persisted_result.py:6` |
-| tools 内部对 `app.agent.prompt` / `app.agent.time_context` / `app.agent.itinerary.*` 的 import **保持不变**（这些仍在 agent/） | `tools/xhs.py:18`、`tools/time.py:5`、`tools/itinerary.py:12-17`、`tools/budget.py:11-12`、`tools/lodging.py:9` |
+| tools 内部对 `app.agent.*` 的 import **全部保持不变**（`tool_result_storage`、`prompt`、`time_context`、`itinerary.*` 均留在 agent/） | `tools/xhs.py:15,18`、`tools/persisted_result.py:6`、`tools/time.py:5`、`tools/itinerary.py:12-17`、`tools/budget.py:11-12`、`tools/lodging.py:9` |
 | `agent/build.py`：`from app.agent.tools import (...)` → `from app.tools import (...)` | `agent/build.py:14` |
 
 ### 3.4 测试引用同步（最易漏，逐一列出）
@@ -119,7 +117,7 @@ backend/app/
 
 1. `cd backend && uv run pytest -q` 全绿。重点盯 `test_tools.py`（monkeypatch 路径）、`test_chat_stream.py`、`test_build_agent.py`、`test_amap.py`、`test_matrix.py`、`conftest.py`。
 2. 冒烟导入：`uv run python -c "import app.main; import app.api.chat_stream; import app.clients.amap; import app.tools; print('import OK')"`。
-3. 残留旧路径检查：全仓 grep `app.graph`、`app.utils.amap`、`app.agent.tools`、`app.agent.tool_result_storage`，在 `app/` 与 `tests/` 下须为零（历史 `docs/` / `plan/` 记录不改动）。
+3. 残留旧路径检查：全仓 grep `app.graph`、`app.utils.amap`、`app.agent.tools`，在 `app/` 与 `tests/` 下须为零（历史 `docs/` / `plan/` 记录不改动）。注意 `app.agent.tool_result_storage` 仍在原位，不在清零之列。
 4. LangGraph 平台入口：确认 `langgraph.json` 指向的 `app/agent/build.py:make_graph` 可加载。
 5. 循环导入检查：确认 `app.agent.build` ↔ `app.tools` 无循环（build 组装期引用 tools，tools 不引用 build）。
 
