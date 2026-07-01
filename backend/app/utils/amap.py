@@ -13,6 +13,15 @@ _TIMEOUT = 5.0
 logger = logging.getLogger(__name__)
 
 
+class AmapRateLimitError(RuntimeError):
+    """高德配额或 QPS 限制，调用方应停止重试并降级。"""
+
+    def __init__(self, infocode: str, info: str):
+        super().__init__(info)
+        self.infocode = infocode
+        self.info = info
+
+
 def _key() -> str:
     return get_settings().amap_web_key.get_secret_value()
 
@@ -57,6 +66,8 @@ async def search_poi(city: str, keywords: str, poi_type: str = "", page_size: in
                 "amap search_poi failed city=%s keywords=%s type=%s infocode=%s info=%s",
                 city, keywords, poi_type, data.get("infocode"), data.get("info"),
             )
+            if data.get("infocode") == "10021":
+                raise AmapRateLimitError(str(data.get("infocode") or ""), str(data.get("info") or ""))
         out = []
         for p in data.get("pois", []) or []:
             loc = (p.get("location") or "").split(",")
@@ -73,6 +84,8 @@ async def search_poi(city: str, keywords: str, poi_type: str = "", page_size: in
                 city, keywords, poi_type, data.get("count"), data.get("infocode"), data.get("info"),
             )
         return out
+    except AmapRateLimitError:
+        raise
     except Exception as exc:  # noqa: BLE001
         logger.warning(
             "amap search_poi exception city=%s keywords=%s type=%s error=%s",

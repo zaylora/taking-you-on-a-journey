@@ -62,6 +62,16 @@ async def _search_poi_with_keyword_fallback(city: str, keywords: str, poi_type: 
     return results
 
 
+def _amap_rate_limit_result() -> dict[str, Any]:
+    return {
+        "ok": False,
+        "error": {
+            "code": "amap_rate_limited",
+            "message": "高德地图服务当前请求过于频繁，请停止继续检索，基于已有信息降级回答或提示稍后重试。",
+        },
+    }
+
+
 class SearchAttractionsArgs(BaseModel):
     """景点检索工具输入。字段说明会暴露给模型用于生成工具调用参数。"""
 
@@ -122,21 +132,25 @@ class PlanRouteArgs(BaseModel):
 
 
 @tool(args_schema=SearchAttractionsArgs)
-async def search_attractions(city: str, keywords: str = "热门景点") -> list:
-    """检索城市景点 POI。返回 [{name,poi_id,lng,lat,address,type}]；失败或无结果返回 []。
+async def search_attractions(city: str, keywords: str = "热门景点") -> list | dict:
+    """检索城市景点 POI。返回 [{name,poi_id,lng,lat,address,type}]；失败或无结果返回 []；高德限流返回 {"ok": false, "error": ...}。
     传参限制：city 优先用地级市；keywords 用短关键词，多个 POI 不要一次塞入同一参数。"""
     try:
         return await _search_poi_with_keyword_fallback(city, keywords, "风景名胜")
+    except amap.AmapRateLimitError:
+        return _amap_rate_limit_result()
     except Exception:  # noqa: BLE001 -- 降级，交 LLM 决策
         return []
 
 
 @tool(args_schema=SearchRestaurantsArgs)
-async def search_restaurants(city: str, keywords: str = "美食") -> list:
-    """检索城市餐饮 POI。返回 [{name,poi_id,lng,lat,...}]；失败或无结果返回 []。
+async def search_restaurants(city: str, keywords: str = "美食") -> list | dict:
+    """检索城市餐饮 POI。返回 [{name,poi_id,lng,lat,...}]；失败或无结果返回 []；高德限流返回 {"ok": false, "error": ...}。
     传参限制：city 优先用地级市；keywords 用短关键词，多个餐厅不要一次塞入同一参数。"""
     try:
         return await _search_poi_with_keyword_fallback(city, keywords, "餐饮")
+    except amap.AmapRateLimitError:
+        return _amap_rate_limit_result()
     except Exception:  # noqa: BLE001
         return []
 

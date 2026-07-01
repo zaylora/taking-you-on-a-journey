@@ -15,6 +15,7 @@ declare module 'vue' {
     AppSidebar: typeof import('./src/components/AppSidebar.vue')['default']
     ChatInput: typeof import('./src/components/ChatInput.vue')['default']
     ChatPanel: typeof import('./src/components/ChatPanel.vue')['default']
+    ClarifyPanel: typeof import('./src/components/ClarifyPanel.vue')['default']
     ElAvatar: typeof import('element-plus/es')['ElAvatar']
     ElButton: typeof import('element-plus/es')['ElButton']
     ElIcon: typeof import('element-plus/es')['ElIcon']

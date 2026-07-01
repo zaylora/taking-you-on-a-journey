@@ -567,6 +567,33 @@ async def test_search_attractions_degrades_to_empty(fake_amap, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_attractions_returns_rate_limit_signal(monkeypatch):
+    async def _rate_limited(*a, **k):
+        raise tools.trip.amap.AmapRateLimitError("10021", "CUQPS_HAS_EXCEEDED_THE_LIMIT")
+
+    monkeypatch.setattr("app.agent.tools.trip.amap.search_poi", _rate_limited)
+
+    out = await tools.search_attractions.ainvoke({"city": "广州", "keywords": "北京路步行街"})
+
+    assert out["ok"] is False
+    assert out["error"]["code"] == "amap_rate_limited"
+    assert "高德" in out["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_search_restaurants_returns_rate_limit_signal(monkeypatch):
+    async def _rate_limited(*a, **k):
+        raise tools.trip.amap.AmapRateLimitError("10021", "CUQPS_HAS_EXCEEDED_THE_LIMIT")
+
+    monkeypatch.setattr("app.agent.tools.trip.amap.search_poi", _rate_limited)
+
+    out = await tools.search_restaurants.ainvoke({"city": "广州", "keywords": "早茶"})
+
+    assert out["ok"] is False
+    assert out["error"]["code"] == "amap_rate_limited"
+
+
+@pytest.mark.asyncio
 async def test_get_weather_tool(fake_amap):
     out = await tools.get_weather.ainvoke({"city": "成都"})
     assert out["text"] == "多云"

@@ -40,6 +40,22 @@ async def test_search_poi_degrades_on_error(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_search_poi_raises_on_quota_limit(monkeypatch):
+    _patch_client(
+        monkeypatch,
+        payload={
+            "status": "0",
+            "infocode": "10021",
+            "info": "CUQPS_HAS_EXCEEDED_THE_LIMIT",
+            "pois": [],
+        },
+    )
+
+    with pytest.raises(amap.AmapRateLimitError):
+        await amap.search_poi("广州", "北京路步行街", "风景名胜")
+
+
+@pytest.mark.asyncio
 async def test_search_poi_logs_empty_diagnostics(monkeypatch, caplog):
     _patch_client(
         monkeypatch,
