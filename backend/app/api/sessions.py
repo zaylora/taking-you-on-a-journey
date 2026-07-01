@@ -1,4 +1,4 @@
-"""M5 anonymous conversation session endpoints."""
+"""M5 匿名对话会话接口。"""
 from fastapi import APIRouter, HTTPException, Request, Response
 
 from app.services.message_history import (
@@ -41,11 +41,10 @@ def _aggregate_messages(messages) -> list[dict]:
 
 
 def _messages_with_xhs_sources(messages: list[dict], sources: list[dict]) -> list[dict]:
-    """Append rendered xhs source links to the latest assistant message for history replay.
+    """为历史回放的最新 assistant 消息追加已渲染的小红书来源链接。
 
-    During realtime streaming, stream.py sends these links as extra token text. LangGraph
-    stores only the model AIMessage, so history snapshots need the same deterministic
-    post-processing when replaying older graph-only sessions.
+    实时流式输出时，stream.py 会把这些链接作为额外 token 文本发送。
+    LangGraph 只存模型 AIMessage，所以回放旧的纯 graph 会话时，也需要做同样的确定性后处理。
     """
     return messages_with_xhs_sources(messages, sources)
 

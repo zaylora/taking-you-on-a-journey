@@ -2,7 +2,7 @@
 """Current-time Agent tool."""
 from langchain_core.tools import tool
 
-from app.agent.time_context import CurrentTimeArgs, current_time_payload
+from app.tools.time_context import CurrentTimeArgs, current_time_payload
 
 
 @tool(args_schema=CurrentTimeArgs)

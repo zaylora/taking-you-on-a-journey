@@ -16,7 +16,7 @@ def test_build_graph_returns_compiled_agent(monkeypatch):
             return ChatResult(generations=[ChatGeneration(message=AIMessage(content="ok"))])
 
     monkeypatch.setattr("app.agent.build.build_llm", lambda *a, **k: _Stub())
-    from app.graph.builder import build_graph
+    from app.agent.build import build_graph
     graph = build_graph(checkpointer=MemorySaver())
     assert hasattr(graph, "astream_events")
     assert hasattr(graph, "aget_state")

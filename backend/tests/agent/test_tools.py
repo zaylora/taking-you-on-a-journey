@@ -5,12 +5,12 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.agent import tools
-from app.agent.build import _TOOLS
-from app.agent.time_context import current_time_payload
-from app.agent.tools import xhs as xhs_tools
-from app.agent.itinerary.schemas import DayPlans
-from app.agent.itinerary.lodging import _AccoResult
+from app import tools
+from app.tools.actions import xhs as xhs_tools
+from app.tools.planning.schemas import DayPlans
+from app.tools.planning.lodging import _AccoResult
+from app.tools.registry import ALL_TOOLS
+from app.tools.time_context import current_time_payload
 from tests.conftest import make_fake_build_llm
 
 
@@ -99,7 +99,7 @@ def test_get_current_time_schema_and_output_shape():
 
 
 def test_xhs_tools_are_registered_with_agent():
-    tool_names = {getattr(t, "name", "") for t in _TOOLS}
+    tool_names = {getattr(t, "name", "") for t in ALL_TOOLS}
 
     assert {
         "xhs_status",
@@ -342,14 +342,12 @@ async def test_xhs_read_note_adds_image_analysis_without_changing_envelope(monke
 
 
 @pytest.mark.asyncio
-async def test_xhs_read_note_persists_large_result(monkeypatch, tmp_path):
+async def test_xhs_read_note_returns_large_result_without_manual_persistence(monkeypatch, tmp_path):
     async def _fake_run(args):
         return {"ok": True, "data": {"content": "顺德攻略" * 200}}
 
     monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
     monkeypatch.setenv("TOOL_RESULT_STORAGE_DIR", str(tmp_path))
-    monkeypatch.setenv("TOOL_RESULT_PERSIST_THRESHOLD_CHARS", "100")
-    monkeypatch.setenv("TOOL_RESULT_PREVIEW_CHARS", "40")
     from app.core.config import get_settings
     get_settings.cache_clear()
 
@@ -360,21 +358,18 @@ async def test_xhs_read_note_persists_large_result(monkeypatch, tmp_path):
     get_settings.cache_clear()
 
     assert out["ok"] is True
-    assert out["persisted"] is True
-    assert out["tool_name"] == "xhs_read_note"
-    assert len(out["preview"]) <= 40
-    assert (tmp_path / out["result_id"]).exists()
+    assert out["data"]["content"] == "顺德攻略" * 200
+    assert "persisted" not in out
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio
-async def test_xhs_comments_all_persists_large_result(monkeypatch, tmp_path):
+async def test_xhs_comments_all_returns_large_result_without_manual_persistence(monkeypatch, tmp_path):
     async def _fake_run(args):
         return {"ok": True, "data": {"comments": [{"content": "排队很久" * 300}]}}
 
     monkeypatch.setattr(xhs_tools, "_run_xhs_json", _fake_run)
     monkeypatch.setenv("TOOL_RESULT_STORAGE_DIR", str(tmp_path))
-    monkeypatch.setenv("TOOL_RESULT_PERSIST_THRESHOLD_CHARS", "100")
-    monkeypatch.setenv("TOOL_RESULT_PREVIEW_CHARS", "40")
     from app.core.config import get_settings
     get_settings.cache_clear()
 
@@ -385,9 +380,9 @@ async def test_xhs_comments_all_persists_large_result(monkeypatch, tmp_path):
     get_settings.cache_clear()
 
     assert out["ok"] is True
-    assert out["persisted"] is True
-    assert out["tool_name"] == "xhs_note_comments"
-    assert (tmp_path / out["result_id"]).exists()
+    assert out["data"]["comments"][0]["content"] == "排队很久" * 300
+    assert "persisted" not in out
+    assert list(tmp_path.iterdir()) == []
 
 
 @pytest.mark.asyncio
@@ -612,7 +607,7 @@ async def test_search_attractions_splits_keywords_when_sparse(monkeypatch):
             return []
         return [{"name": keywords, "poi_id": keywords, "lng": 113.0, "lat": 23.0}]
 
-    monkeypatch.setattr("app.agent.tools.trip.amap.search_poi", _search_poi)
+    monkeypatch.setattr("app.tools.actions.trip.amap.search_poi", _search_poi)
 
     out = await tools.search_attractions.ainvoke({
         "city": "佛山",
@@ -631,7 +626,7 @@ async def test_search_attractions_splits_keywords_when_sparse(monkeypatch):
 async def test_search_attractions_degrades_to_empty(fake_amap, monkeypatch):
     async def _boom(*a, **k):
         raise RuntimeError("amap down")
-    monkeypatch.setattr("app.agent.tools.trip.amap.search_poi", _boom)
+    monkeypatch.setattr("app.tools.actions.trip.amap.search_poi", _boom)
     out = await tools.search_attractions.ainvoke({"city": "北京", "keywords": "x"})
     assert out == []
 
@@ -641,7 +636,7 @@ async def test_search_attractions_returns_rate_limit_signal(monkeypatch):
     async def _rate_limited(*a, **k):
         raise tools.trip.amap.AmapRateLimitError("10021", "CUQPS_HAS_EXCEEDED_THE_LIMIT")
 
-    monkeypatch.setattr("app.agent.tools.trip.amap.search_poi", _rate_limited)
+    monkeypatch.setattr("app.tools.actions.trip.amap.search_poi", _rate_limited)
 
     out = await tools.search_attractions.ainvoke({"city": "广州", "keywords": "北京路步行街"})
 
@@ -655,7 +650,7 @@ async def test_search_restaurants_returns_rate_limit_signal(monkeypatch):
     async def _rate_limited(*a, **k):
         raise tools.trip.amap.AmapRateLimitError("10021", "CUQPS_HAS_EXCEEDED_THE_LIMIT")
 
-    monkeypatch.setattr("app.agent.tools.trip.amap.search_poi", _rate_limited)
+    monkeypatch.setattr("app.tools.actions.trip.amap.search_poi", _rate_limited)
 
     out = await tools.search_restaurants.ainvoke({"city": "广州", "keywords": "早茶"})
 
@@ -674,7 +669,7 @@ async def test_assemble_itinerary_runs_ortools_pipeline(fake_amap, monkeypatch, 
     # soft_fill 的 LLM 输出（structured DayPlans）
     fake = DayPlans(days=[{"day": 1, "items": [
         {"type": "attraction", "name": "故宫", "poi_id": "p1", "cost": 60}]}])
-    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", make_fake_build_llm(structured=fake))
+    monkeypatch.setattr("app.tools.actions.itinerary.build_llm", make_fake_build_llm(structured=fake))
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
     from app.core.config import get_settings
     get_settings.cache_clear()
@@ -698,7 +693,7 @@ async def test_assemble_itinerary_success_uses_note_enrichment_payload(fake_amap
     fake = DayPlans(days=[{"day": 1, "items": [
         {"type": "attraction", "name": "祖庙", "poi_id": "p1", "cost": 20}]}])
     monkeypatch.setattr(
-        "app.agent.tools.itinerary.build_llm",
+        "app.tools.actions.itinerary.build_llm",
         lambda *_a, **_k: _CapturingStructuredLLM(fake, calls),
     )
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
@@ -753,7 +748,7 @@ async def test_assemble_itinerary_success_only_merges_matching_llm_notes(fake_am
             "note": "must ignore",
         },
     ]}])
-    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", make_fake_build_llm(structured=fake))
+    monkeypatch.setattr("app.tools.actions.itinerary.build_llm", make_fake_build_llm(structured=fake))
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
     from app.core.config import get_settings
     get_settings.cache_clear()
@@ -784,7 +779,7 @@ async def test_assemble_itinerary_success_only_merges_matching_llm_notes(fake_am
 
 @pytest.mark.asyncio
 async def test_assemble_itinerary_empty_candidates(fake_amap, monkeypatch):
-    monkeypatch.setattr("app.agent.tools.itinerary.build_llm",
+    monkeypatch.setattr("app.tools.actions.itinerary.build_llm",
                         make_fake_build_llm(structured=DayPlans(days=[])))
     out = await tools.assemble_itinerary.ainvoke({
         "city": "北京", "days": 2, "attractions": [], "restaurants": [], "weather": {},
@@ -795,7 +790,7 @@ async def test_assemble_itinerary_empty_candidates(fake_amap, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_assemble_itinerary_degrades_to_skeleton_when_soft_fill_fails(fake_amap, monkeypatch, tmp_path):
-    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", lambda *_a, **_k: _FailingStructuredLLM())
+    monkeypatch.setattr("app.tools.actions.itinerary.build_llm", lambda *_a, **_k: _FailingStructuredLLM())
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
     from app.core.config import get_settings
     get_settings.cache_clear()
@@ -824,7 +819,7 @@ async def test_assemble_itinerary_degrades_to_skeleton_when_soft_fill_fails(fake
 
 @pytest.mark.asyncio
 async def test_assemble_itinerary_degrades_to_skeleton_when_llm_construction_fails(fake_amap, monkeypatch, tmp_path):
-    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", _RaisingBuildLLM())
+    monkeypatch.setattr("app.tools.actions.itinerary.build_llm", _RaisingBuildLLM())
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
     from app.core.config import get_settings
     get_settings.cache_clear()
@@ -852,7 +847,7 @@ async def test_assemble_itinerary_degrades_to_skeleton_when_llm_construction_fai
 
 @pytest.mark.asyncio
 async def test_assemble_itinerary_degrades_to_skeleton_when_soft_fill_output_invalid(fake_amap, monkeypatch, tmp_path):
-    monkeypatch.setattr("app.agent.tools.itinerary.build_llm", lambda *_a, **_k: _InvalidStructuredLLM())
+    monkeypatch.setattr("app.tools.actions.itinerary.build_llm", lambda *_a, **_k: _InvalidStructuredLLM())
     monkeypatch.setenv("CHECKPOINT_DB_PATH", str(tmp_path / "checkpoints.sqlite"))
     from app.core.config import get_settings
     get_settings.cache_clear()
@@ -881,7 +876,7 @@ async def test_assemble_itinerary_degrades_to_skeleton_when_soft_fill_output_inv
 
 @pytest.mark.asyncio
 async def test_assemble_itinerary_accepts_stringified_budget_advice(fake_amap, monkeypatch):
-    monkeypatch.setattr("app.agent.tools.itinerary.build_llm",
+    monkeypatch.setattr("app.tools.actions.itinerary.build_llm",
                         make_fake_build_llm(structured=DayPlans(days=[])))
     out = await tools.assemble_itinerary.ainvoke({
         "city": "佛山",
@@ -909,7 +904,7 @@ def test_assemble_itinerary_schema_describes_budget_advice_as_object_not_string(
 @pytest.mark.asyncio
 async def test_assign_hotels_embeds(fake_amap, monkeypatch):
     res = _AccoResult(assignments=[{"day": 1, "hotel": {"name": "如家", "price": 300, "level": "经济"}}])
-    monkeypatch.setattr("app.agent.tools.lodging.build_llm", make_fake_build_llm(structured=res))
+    monkeypatch.setattr("app.tools.actions.lodging.build_llm", make_fake_build_llm(structured=res))
     dps = [{"day": 1, "items": []}, {"day": 2, "items": []}]  # 过夜日=第1天
     out = await tools.assign_hotels.ainvoke({"city": "北京", "day_plans": dps, "level": "经济"})
     assert out[0]["hotel"]["name"] == "如家"
@@ -918,7 +913,7 @@ async def test_assign_hotels_embeds(fake_amap, monkeypatch):
 @pytest.mark.asyncio
 async def test_assign_hotels_accepts_stringified_daily_centers(fake_amap, monkeypatch):
     res = _AccoResult(assignments=[{"day": 1, "hotel": {"name": "如家", "price": 300, "level": "经济"}}])
-    monkeypatch.setattr("app.agent.tools.lodging.build_llm", make_fake_build_llm(structured=res))
+    monkeypatch.setattr("app.tools.actions.lodging.build_llm", make_fake_build_llm(structured=res))
     dps = [{"day": 1, "items": []}, {"day": 2, "items": []}]
 
     out = await tools.assign_hotels.ainvoke({

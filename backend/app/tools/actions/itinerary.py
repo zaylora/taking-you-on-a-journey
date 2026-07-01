@@ -9,14 +9,14 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
-from app.agent.itinerary.fill import fill_day_plans, merge_safe_notes
-from app.agent.itinerary.schemas import DayPlans, ITINERARY_SYS
-from app.agent.itinerary.routing.assembler import routes_to_day_plans
-from app.agent.itinerary.routing.matrix import duration_matrix
-from app.agent.itinerary.routing.optimizer import solve_vrptw
-from app.agent.itinerary.routing.prefilter import select_candidates
 from app.core.config import get_settings
 from app.llm.factory import build_llm
+from app.tools.planning.fill import fill_day_plans, merge_safe_notes
+from app.tools.planning.routing.assembler import routes_to_day_plans
+from app.tools.planning.routing.matrix import duration_matrix
+from app.tools.planning.routing.optimizer import solve_vrptw
+from app.tools.planning.routing.prefilter import select_candidates
+from app.tools.planning.schemas import DayPlans, ITINERARY_SYS
 
 from .utils import parse_jsonish_string
 

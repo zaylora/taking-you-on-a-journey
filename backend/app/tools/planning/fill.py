@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import date, datetime, timedelta
 from typing import Any
 
-from app.agent.itinerary.schemas import DayPlans
+from app.tools.planning.schemas import DayPlans
 
 
 def _parse_date(value: str) -> date | None:

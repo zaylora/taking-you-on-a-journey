@@ -3,8 +3,8 @@
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from app.agent.tool_result_storage import read_persisted_tool_result_slice
 from app.core.config import get_settings
+from app.tools.tool_result_storage import read_persisted_tool_result_slice
 
 
 class ReadPersistedToolResultArgs(BaseModel):

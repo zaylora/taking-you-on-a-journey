@@ -3,7 +3,7 @@
 from pydantic import BaseModel, Field
 
 from app.agent.prompt import ACCOMMODATION_SYS
-from app.agent.itinerary.schemas import Hotel
+from app.tools.planning.schemas import Hotel
 
 _LEVEL_KEYWORD = {"经济": "经济型酒店", "舒适": "舒适型酒店", "高端": "高档酒店"}
 

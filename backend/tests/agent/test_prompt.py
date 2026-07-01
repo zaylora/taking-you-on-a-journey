@@ -6,8 +6,8 @@ from app.agent.prompt import (
     ACCOMMODATION_SYS, CURRENT_TIME_CONTEXT_TEMPLATE, ITINERARY_SYS,
     TRIP_AGENT_SYS, TRIP_SUMMARY_PROMPT, XHS_RESEARCH_SYS,
 )
-from app.agent.build import _TOOLS
-from app.agent.time_context import build_system_prompt
+from app.tools.registry import ALL_TOOLS
+from app.tools.time_context import build_system_prompt
 
 
 def test_prompt_covers_key_directives():
@@ -98,7 +98,7 @@ def test_xhs_research_prompt_mentions_image_text_analysis():
 
 def test_prompt_does_not_duplicate_registered_tool_catalog():
     p = TRIP_AGENT_SYS
-    tool_names = {getattr(t, "name", "") for t in _TOOLS}
+    tool_names = {getattr(t, "name", "") for t in ALL_TOOLS}
     leaked = sorted(name for name in tool_names if name and name in p)
     assert "可用工具" not in p
     assert leaked == []
@@ -106,7 +106,7 @@ def test_prompt_does_not_duplicate_registered_tool_catalog():
 
 def test_prompt_asks_for_missing_info_with_structured_clarification_tool():
     p = TRIP_AGENT_SYS
-    tool_names = {getattr(t, "name", "") for t in _TOOLS}
+    tool_names = {getattr(t, "name", "") for t in ALL_TOOLS}
     assert "ask_clarification" in tool_names
     assert "ask_user" not in tool_names
     assert "ask_user" not in p

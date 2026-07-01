@@ -4,8 +4,6 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from langchain.agents.middleware import AgentMiddleware, ModelRequest
-from langchain_core.messages import SystemMessage
 from pydantic import BaseModel, Field
 
 from app.agent.prompt import CURRENT_TIME_CONTEXT_TEMPLATE, TRIP_AGENT_SYS
@@ -56,13 +54,3 @@ class CurrentTimeArgs(BaseModel):
     )
 
 
-class CurrentTimePromptMiddleware(AgentMiddleware):
-    """把当前时间快照注入每一次模型调用的 system message。"""
-
-    def wrap_model_call(self, request: ModelRequest, handler):
-        request = request.override(system_message=SystemMessage(content=build_system_prompt()))
-        return handler(request)
-
-    async def awrap_model_call(self, request: ModelRequest, handler):
-        request = request.override(system_message=SystemMessage(content=build_system_prompt()))
-        return await handler(request)

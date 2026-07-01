@@ -6,11 +6,11 @@ from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field, field_validator
 
-from app.agent.itinerary.lodging import (
+from app.tools.clients import amap
+from app.tools.planning.lodging import (
     ACCO_SYS, _AccoResult, attach_hotels, hotel_keyword, overnight_days,
 )
 from app.llm.factory import build_llm
-from app.utils import amap
 
 from .utils import parse_jsonish_string
 

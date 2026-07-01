@@ -3,7 +3,7 @@ from fastapi import APIRouter, Request
 from sse_starlette import EventSourceResponse
 
 from app.schemas.chat import ChatRequest
-from app.graph.stream import sse_events
+from app.api.chat_stream import sse_events
 
 router = APIRouter()
 

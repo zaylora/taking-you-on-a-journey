@@ -1,4 +1,4 @@
-from app.agent.itinerary.diffing import diff_changed_days
+from app.tools.planning.diffing import diff_changed_days
 
 
 def _day(day, items, hotel=None):

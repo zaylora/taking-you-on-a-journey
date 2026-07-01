@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.tools import tool
 from pydantic import BaseModel, Field
 
-from app.utils import amap
+from app.tools.clients import amap
 
 _KEYWORD_SPLIT_RE = re.compile(r"[\s,，、;；/|]+")
 _SEARCH_MIN_RESULTS = 3

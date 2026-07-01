@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-from app.agent.itinerary.fill import fill_day_plans, merge_safe_notes
+from app.tools.planning.fill import fill_day_plans, merge_safe_notes
 
 
 def test_fill_day_plans_adds_weather_center_times_and_meals():

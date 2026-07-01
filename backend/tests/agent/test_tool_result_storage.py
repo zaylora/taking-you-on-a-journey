@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 import json
 
-from app.agent.tool_result_storage import (
+from app.tools.tool_result_storage import (
     maybe_persist_tool_result,
     read_persisted_tool_result_slice,
 )

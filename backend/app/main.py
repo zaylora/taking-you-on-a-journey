@@ -15,7 +15,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from app.core.config import get_settings
 from app.api.chat import router as chat_router
 from app.api.sessions import router as sessions_router
-from app.graph.builder import build_graph
+from app.agent.build import build_graph
 from app.services.session_store import SessionStore
 
 
@@ -73,4 +73,4 @@ async def health():
 def start_dev():
     """用于开发环境启动的便捷入口 (由 uv run dev 调用)"""
     import uvicorn
-    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="127.0.0.1", port=8000, reload=False)

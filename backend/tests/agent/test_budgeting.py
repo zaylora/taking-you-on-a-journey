@@ -1,4 +1,4 @@
-from app.agent.itinerary.budgeting import compute_budget, _sum_costs
+from app.tools.planning.budgeting import compute_budget, _sum_costs
 
 
 def _day(day, items, hotel=None):

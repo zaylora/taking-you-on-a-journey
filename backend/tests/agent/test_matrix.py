@@ -1,6 +1,6 @@
 import pytest
 
-from app.agent.itinerary.routing import matrix
+from app.tools.planning.routing import matrix
 
 
 def test_haversine_seconds_zero_for_same_point():
@@ -36,7 +36,7 @@ async def test_duration_matrix_uses_cache_second_call(tmp_path, monkeypatch):
         return [{"origin_id": i + 1, "dest_id": 1, "distance": 1000, "duration": 600}
                 for i in range(len(origins))]
 
-    monkeypatch.setattr("app.utils.amap.distance_batch", _fake_batch)
+    monkeypatch.setattr("app.tools.clients.amap.distance_batch", _fake_batch)
     nodes = [{"poi_id": "a", "lng": 104.0, "lat": 30.6},
              {"poi_id": "b", "lng": 104.1, "lat": 30.7}]
     db = str(tmp_path / "dist.sqlite")

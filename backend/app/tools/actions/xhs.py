@@ -12,8 +12,6 @@ from langchain_core.tools import InjectedToolCallId, tool
 from langgraph.types import Command
 from pydantic import BaseModel, Field
 
-from app.agent.tool_result_storage import maybe_persist_tool_result
-from app.core.config import get_settings
 from app.llm.factory import build_llm
 from app.agent.prompt import XHS_RESEARCH_SYS
 
@@ -331,18 +329,6 @@ def _compact_json(value: Any, *, limit: int = _NOTE_TEXT_LIMIT) -> str:
     return text[:limit]
 
 
-def _maybe_persist_xhs_result(result: dict[str, Any], *, tool_name: str, tool_call_id: str = "") -> dict[str, Any]:
-    settings = get_settings()
-    return maybe_persist_tool_result(
-        result,
-        tool_name=tool_name,
-        tool_call_id=tool_call_id,
-        storage_dir=settings.tool_result_storage_dir,
-        threshold_chars=settings.tool_result_persist_threshold_chars,
-        preview_chars=settings.tool_result_preview_chars,
-    )
-
-
 class XhsSearchNotesArgs(BaseModel):
     """Search Xiaohongshu notes."""
 
@@ -549,7 +535,7 @@ async def xhs_search_notes(
         "--type", note_type,
         "--page", str(page),
     ])
-    return _maybe_persist_xhs_result(result, tool_name="xhs_search_notes")
+    return result
 
 
 @tool(args_schema=XhsReadNoteArgs)
@@ -571,7 +557,7 @@ async def xhs_read_note(
             "warnings": list(analysis.get("warnings", [])),
         }
         result["meta"] = meta
-    return _maybe_persist_xhs_result(result, tool_name="xhs_read_note")
+    return result
 
 
 @tool(args_schema=XhsCommentsArgs)
@@ -584,7 +570,7 @@ async def xhs_note_comments(
     if include_all:
         args.append("--all")
     result = await _run_xhs_json(args)
-    return _maybe_persist_xhs_result(result, tool_name="xhs_note_comments")
+    return result
 
 
 @tool(args_schema=XhsHotNotesArgs)
@@ -596,7 +582,7 @@ async def xhs_hot_notes(
 ) -> dict[str, Any]:
     """浏览小红书热门笔记，默认旅行分类。"""
     result = await _run_xhs_json(["hot", "-c", category])
-    return _maybe_persist_xhs_result(result, tool_name="xhs_hot_notes")
+    return result
 
 
 @tool(args_schema=XhsUserProfileArgs)
@@ -605,7 +591,7 @@ async def xhs_user_profile(
 ) -> dict[str, Any]:
     """读取小红书用户主页资料。"""
     result = await _run_xhs_json(["user", user_id])
-    return _maybe_persist_xhs_result(result, tool_name="xhs_user_profile")
+    return result
 
 
 def _research_command(

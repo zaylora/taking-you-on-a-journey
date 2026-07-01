@@ -22,6 +22,17 @@ def _serialize_result(result: Any) -> str:
     return json.dumps(result, ensure_ascii=False, default=str)
 
 
+def _write_result_file(text: str, *, tool_name: str, tool_call_id: str, storage_dir: str | Path) -> str:
+    base_dir = Path(storage_dir)
+    base_dir.mkdir(parents=True, exist_ok=True)
+    safe_tool = _safe_part(tool_name, "tool")
+    safe_call = _safe_part(tool_call_id, uuid.uuid4().hex[:12])
+    result_id = f"{safe_tool}-{safe_call}.json"
+    path = base_dir / result_id
+    path.write_text(text, encoding="utf-8")
+    return result_id
+
+
 def maybe_persist_tool_result(
     result: Any,
     *,
@@ -36,13 +47,12 @@ def maybe_persist_tool_result(
     if len(text) <= threshold_chars:
         return result
 
-    base_dir = Path(storage_dir)
-    base_dir.mkdir(parents=True, exist_ok=True)
-    safe_tool = _safe_part(tool_name, "tool")
-    safe_call = _safe_part(tool_call_id, uuid.uuid4().hex[:12])
-    result_id = f"{safe_tool}-{safe_call}.json"
-    path = base_dir / result_id
-    path.write_text(text, encoding="utf-8")
+    result_id = _write_result_file(
+        text,
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        storage_dir=storage_dir,
+    )
 
     return {
         "ok": True,
@@ -54,6 +64,38 @@ def maybe_persist_tool_result(
         "preview": text[:max(0, preview_chars)],
         "hint": "完整工具结果已落盘；如确实需要原文，调用 read_persisted_tool_result 按 offset/limit 分页读取。",
     }
+
+
+def persist_tool_content(
+    content: Any,
+    *,
+    tool_name: str,
+    tool_call_id: str,
+    storage_dir: str | Path,
+    threshold_chars: int,
+    preview_chars: int,
+) -> str | None:
+    """content 归一化为文本；超阈值则落盘并返回 envelope JSON，否则返回 None。"""
+    text = content if isinstance(content, str) else _serialize_result(content)
+    if len(text) <= threshold_chars:
+        return None
+
+    result_id = _write_result_file(
+        text,
+        tool_name=tool_name,
+        tool_call_id=tool_call_id,
+        storage_dir=storage_dir,
+    )
+    return json.dumps({
+        "ok": True,
+        "persisted": True,
+        "tool_name": tool_name,
+        "result_id": result_id,
+        "original_chars": len(text),
+        "preview_chars": max(0, preview_chars),
+        "preview": text[:max(0, preview_chars)],
+        "hint": "完整工具结果已落盘；如需原文，调用 read_persisted_tool_result 按 offset/limit 分页读取。",
+    }, ensure_ascii=False)
 
 
 def _resolve_result_path(result_id: str, storage_dir: str | Path) -> Path | None:

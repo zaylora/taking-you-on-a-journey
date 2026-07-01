@@ -10,23 +10,10 @@ from langgraph.checkpoint.memory import MemorySaver
 
 from app.agent.prompt import TRIP_AGENT_SYS, TRIP_SUMMARY_PROMPT
 from app.agent.state import TripState
-from app.agent.time_context import CurrentTimePromptMiddleware
-from app.agent.tools import (
-    get_current_time, search_attractions, search_restaurants, get_weather, plan_route,
-    assemble_itinerary, assign_hotels, compute_budget_tool, finalize_plan,
-    ask_clarification, read_persisted_tool_result,
-    xhs_status, research_xhs_travel_guide, xhs_search_notes, xhs_read_note,
-    xhs_note_comments, xhs_hot_notes, xhs_user_profile,
-)
 from app.llm.factory import build_llm
-
-_TOOLS = [
-    get_current_time, search_attractions, search_restaurants, get_weather, plan_route,
-    assemble_itinerary, assign_hotels, compute_budget_tool, finalize_plan,
-    ask_clarification, read_persisted_tool_result,
-    xhs_status, research_xhs_travel_guide, xhs_search_notes, xhs_read_note,
-    xhs_note_comments, xhs_hot_notes, xhs_user_profile,
-]
+from app.middleware.current_time import CurrentTimePromptMiddleware
+from app.middleware.tool_result_persistence import ToolResultPersistenceMiddleware
+from app.tools import ALL_TOOLS
 
 # 用哨兵区分「未传 checkpointer」（默认 MemorySaver）与「显式不要 checkpointer」（None）。
 # 后者用于 langgraph dev：平台自带持久化，外挂 checkpointer 会冲突。
@@ -34,9 +21,10 @@ _DEFAULT = object()
 
 
 def _build_context_middleware():
-    """上下文治理：先清旧工具结果，再在长对话时摘要旧消息。"""
+    """上下文治理：注入时间、大结果落盘、工具清理和长对话摘要。"""
     return [
         CurrentTimePromptMiddleware(),
+        ToolResultPersistenceMiddleware(),
         # 工具输出是旅行规划里最容易膨胀的部分。先清旧工具结果，保留最近
         # 4 个结果支撑当前推理；最终确认和预算结果很短且有业务语义，不清。
         ContextEditingMiddleware(
@@ -67,9 +55,22 @@ def build_trip_agent(checkpointer=_DEFAULT):
         checkpointer = MemorySaver()
     return create_agent(
         model=build_llm(temperature=0, disable_streaming=False),
-        tools=_TOOLS,
+        tools=ALL_TOOLS,
         system_prompt=TRIP_AGENT_SYS,
         middleware=_build_context_middleware(),
         state_schema=TripState,
         checkpointer=checkpointer,
     )
+
+
+def build_graph(checkpointer=None):
+    return build_trip_agent(checkpointer)
+
+
+def make_graph():
+    """langgraph dev / LangGraph Platform 入口。
+
+    平台自带持久化（checkpointer + store），显式传 None 关掉内置 MemorySaver，
+    避免与平台冲突。langgraph.json 的 graphs 指向本函数。
+    """
+    return build_trip_agent(checkpointer=None)

@@ -11,7 +11,7 @@ from types import SimpleNamespace
 import pytest
 from langchain_core.messages import AIMessage, AIMessageChunk, HumanMessage
 
-from app.graph.stream import sse_events
+from app.api.chat_stream import sse_events
 from app.services.session_store import SessionStore
 
 
@@ -26,7 +26,7 @@ def test_chat_rejects_empty_message(client):
     assert resp.status_code == 422
 
 
-from app.graph.stream import render_xhs_sources
+from app.services.message_history import render_xhs_sources
 
 
 def test_render_xhs_sources_basic():
