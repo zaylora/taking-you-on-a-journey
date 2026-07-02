@@ -1,3 +1,5 @@
+import type { ChatMessage } from "@/lib/types";
+
 export interface ParsedSseEvent {
   event: string;
   data: unknown;
@@ -11,6 +13,7 @@ export interface ParsedSseChunk {
 export interface FetchTripChatStreamInput {
   message: string;
   threadId: string | null;
+  messages?: ChatMessage[];
   baseUrl?: string;
 }
 
@@ -18,6 +21,22 @@ type FetchLike = typeof fetch;
 
 const defaultBaseUrl = () =>
   process.env.NEXT_PUBLIC_API_BASE || "http://localhost:8000";
+
+function messageContent(message: ChatMessage) {
+  return message.parts
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("");
+}
+
+function serializeMessages(messages: ChatMessage[] | undefined) {
+  return messages
+    ?.map((message) => ({
+      role: message.role,
+      content: messageContent(message),
+    }))
+    .filter((message) => message.content.trim().length > 0);
+}
 
 export function parseSseChunk(text: string): ParsedSseChunk {
   const frames = text.split(/\r?\n\r?\n/);
@@ -62,6 +81,7 @@ export async function fetchTripChatStream(
     body: JSON.stringify({
       message: input.message,
       thread_id: input.threadId,
+      ...(input.messages ? { messages: serializeMessages(input.messages) } : {}),
     }),
     signal,
   });
@@ -89,4 +109,3 @@ export async function fetchTripChatStream(
     }
   }
 }
-

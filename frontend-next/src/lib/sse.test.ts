@@ -51,6 +51,23 @@ describe("fetchTripChatStream", () => {
         message: "规划广州三日游",
         threadId: "thread-1",
         baseUrl: "http://api.test",
+        messages: [
+          {
+            id: "user-1",
+            role: "user",
+            parts: [{ type: "text", text: "我喜欢博物馆" }],
+          },
+          {
+            id: "assistant-1",
+            role: "assistant",
+            parts: [{ type: "text", text: "可以安排广东省博物馆。" }],
+          },
+          {
+            id: "user-2",
+            role: "user",
+            parts: [{ type: "text", text: "规划广州三日游" }],
+          },
+        ],
       },
       (event, data) => events.push({ event, data }),
       undefined,
@@ -63,6 +80,20 @@ describe("fetchTripChatStream", () => {
       body: JSON.stringify({
         message: "规划广州三日游",
         thread_id: "thread-1",
+        messages: [
+          {
+            role: "user",
+            content: "我喜欢博物馆",
+          },
+          {
+            role: "assistant",
+            content: "可以安排广东省博物馆。",
+          },
+          {
+            role: "user",
+            content: "规划广州三日游",
+          },
+        ],
       }),
       signal: undefined,
     });
@@ -72,4 +103,3 @@ describe("fetchTripChatStream", () => {
     ]);
   });
 });
-

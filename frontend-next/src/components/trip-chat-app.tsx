@@ -12,7 +12,7 @@ import {
   setActivePoi,
   userMessage,
 } from "@/lib/trip-state";
-import type { TripSseEvent, TripUiState } from "@/lib/types";
+import type { ChatMessage, TripSseEvent, TripUiState } from "@/lib/types";
 
 type Action =
   | { type: "event"; event: TripSseEvent }
@@ -35,12 +35,16 @@ export function TripChatApp({ initialState }: TripChatAppProps) {
 
   const handleSubmit = async (message: string) => {
     const controller = new AbortController();
+    const history: ChatMessage[] = [
+      ...state.messages,
+      userMessage(message, state.messages.length + 1),
+    ];
     abortRef.current = controller;
     dispatch({ type: "submit", message });
 
     try {
       await fetchTripChatStream(
-        { message, threadId: state.threadId },
+        { message, threadId: state.threadId, messages: history },
         (event, data) => {
           if (typeof data === "object" && data !== null) {
             dispatch({
@@ -76,6 +80,7 @@ export function TripChatApp({ initialState }: TripChatAppProps) {
     <main className="flex h-dvh min-h-0 overflow-hidden bg-zinc-950">
       <ChatPanel
         messages={state.messages}
+        activeNodeLabel={state.activeNodeLabel}
         loading={state.loading}
         onSubmit={handleSubmit}
         onStop={handleStop}
@@ -104,10 +109,19 @@ function reducer(state: TripUiState, action: Action): TripUiState {
         ...state,
         loading: true,
         error: null,
+        nodeProgress: {},
+        nodeLabels: {},
+        activeNodeLabel: null,
         messages: [...state.messages, userMessage(action.message, state.messages.length + 1)],
       };
     case "loading":
-      return { ...state, loading: action.value };
+      return {
+        ...state,
+        loading: action.value,
+        activeNodeLabel: action.value ? state.activeNodeLabel : null,
+        nodeProgress: action.value ? state.nodeProgress : {},
+        nodeLabels: action.value ? state.nodeLabels : {},
+      };
     case "close-artifact":
       return { ...state, artifactOpen: false };
     case "select-day":

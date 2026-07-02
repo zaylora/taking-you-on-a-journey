@@ -89,7 +89,9 @@ export interface TripUiState {
   artifactOpen: boolean;
   activeDay: number | null;
   activePoiId: string | null;
+  nodeProgress: Record<string, "running" | "done">;
+  nodeLabels: Record<string, string>;
+  activeNodeLabel: string | null;
   loading: boolean;
   error: string | null;
 }
-

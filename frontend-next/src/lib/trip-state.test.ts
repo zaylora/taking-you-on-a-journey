@@ -40,6 +40,58 @@ describe("trip state reducer", () => {
     ]);
   });
 
+  it("tracks node start and end labels for the transient thinking state", () => {
+    let state = createInitialTripState();
+
+    state = applyTripEvent(state, {
+      event: "node_start",
+      data: { node: "model", label: "正在思考..." },
+    });
+
+    expect(state.activeNodeLabel).toBe("正在思考...");
+    expect(state.nodeProgress.model).toBe("running");
+
+    state = applyTripEvent(state, {
+      event: "node_end",
+      data: { node: "model" },
+    });
+
+    expect(state.activeNodeLabel).toBeNull();
+    expect(state.nodeProgress.model).toBe("done");
+  });
+
+  it("finishes the matching repeated tool call by label", () => {
+    let state = createInitialTripState();
+
+    state = applyTripEvent(state, {
+      event: "tool_call",
+      data: { tool: "search_restaurants", label: "搜索广州餐厅：陶陶居" },
+    });
+    state = applyTripEvent(state, {
+      event: "tool_call",
+      data: { tool: "search_restaurants", label: "搜索广州餐厅：点都德" },
+    });
+    state = applyTripEvent(state, {
+      event: "tool_result",
+      data: { tool: "search_restaurants", label: "搜索广州餐厅：点都德" },
+    });
+
+    expect(state.messages[0].parts).toEqual([
+      {
+        type: "tool",
+        tool: "search_restaurants",
+        label: "搜索广州餐厅：陶陶居",
+        status: "running",
+      },
+      {
+        type: "tool",
+        tool: "search_restaurants",
+        label: "搜索广州餐厅：点都德",
+        status: "done",
+      },
+    ]);
+  });
+
   it("opens the artifact when final day plans arrive", () => {
     let state = createInitialTripState();
 
@@ -58,4 +110,3 @@ describe("trip state reducer", () => {
     expect(state.planVersion).toBe(3);
   });
 });
-
