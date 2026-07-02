@@ -28,14 +28,21 @@ interface AmapMarkerConstructor {
 interface AmapMap {
   add(target: AmapMarker): void;
   remove(target: AmapMarker): void;
-  setFitView(markers: AmapMarker[], immediately?: boolean, padding?: number[]): void;
+  setFitView(
+    markers: AmapMarker[],
+    immediately?: boolean,
+    padding?: number[],
+  ): void;
   getZoom(): number;
   setZoomAndCenter(zoom: number, position: unknown): void;
   destroy(): void;
 }
 
 interface AmapMapConstructor {
-  new (container: HTMLElement, options: { zoom: number; viewMode: string }): AmapMap;
+  new (
+    container: HTMLElement,
+    options: { zoom: number; viewMode: string },
+  ): AmapMap;
 }
 
 interface AmapNamespace {
@@ -146,7 +153,10 @@ export function AmapView({
     const marker = markerMapRef.current.get(activePoiId);
     const position = marker?.getPosition?.();
     if (position) {
-      mapRef.current.setZoomAndCenter(Math.max(mapRef.current.getZoom(), 14), position);
+      mapRef.current.setZoomAndCenter(
+        Math.max(mapRef.current.getZoom(), 14),
+        position,
+      );
     }
   }, [activePoiId]);
 
@@ -154,15 +164,18 @@ export function AmapView({
     <div className="relative h-full min-h-[260px] w-full">
       <div ref={containerRef} className="h-full min-h-[260px] w-full" />
       {error ? <MapOverlay title={error} /> : null}
-      {!error && !dayPlans.length ? <MapOverlay title="生成行程后显示地图" /> : null}
+      {!error && !dayPlans.length ? (
+        <MapOverlay title="生成行程后显示地图" />
+      ) : null}
     </div>
   );
 }
 
 function MapOverlay({ title }: { title: string }) {
-  const Icon = title.includes("失败") || title.includes("未配置")
-    ? TriangleAlert
-    : MapPinned;
+  const Icon =
+    title.includes("失败") || title.includes("未配置")
+      ? TriangleAlert
+      : MapPinned;
   return (
     <div className="absolute inset-0 flex items-center justify-center bg-zinc-100 p-6 text-center">
       <div>
@@ -204,7 +217,11 @@ function renderMarkers({
     let index = 1;
 
     for (const item of day.items) {
-      if (item.type === "transport" || !item.poi_id || !isLocation(item.location)) {
+      if (
+        item.type === "transport" ||
+        !item.poi_id ||
+        !isLocation(item.location)
+      ) {
         continue;
       }
       const marker = new AMap.Marker({
@@ -237,7 +254,12 @@ function renderMarkers({
   if (markers.length) map.setFitView(markers, false, [50, 50, 50, 50]);
 }
 
-function markerHtml(index: number, color: string, active: boolean, hotel = false) {
+function markerHtml(
+  index: number,
+  color: string,
+  active: boolean,
+  hotel = false,
+) {
   const radius = hotel ? "5px" : "50%";
   const opacity = active ? 1 : 0.38;
   return `<div style="width:24px;height:24px;line-height:24px;text-align:center;border-radius:${radius};background:${color};opacity:${opacity};color:#fff;font-size:12px;font-weight:700;box-shadow:0 2px 8px rgba(0,0,0,.22);">${index}</div>`;

@@ -72,7 +72,6 @@ export function ChatPanel({
     !!activeNodeLabel &&
     !lastAssistantIsStreamingText(messages) &&
     !lastAssistantHasRunningTool(messages);
-  const showLoading = loading && !showThinking;
 
   const handleSubmit = (message: PromptInputMessage) => {
     const text = message.text.trim();
@@ -120,7 +119,7 @@ export function ChatPanel({
           data-testid="ai-elements-conversation"
           className="h-full"
         >
-          <ConversationContent className="mx-auto w-full max-w-3xl gap-8 px-4 pb-40 pt-8">
+          <ConversationContent className="mx-auto w-full max-w-3xl gap-8 px-4 pb-6 pt-8">
             {messages.length === 0 ? (
               <ConversationEmptyState
                 icon={<Sparkles className="size-10" />}
@@ -142,17 +141,16 @@ export function ChatPanel({
               ))
             )}
             {showThinking ? <ThinkingStatus label={activeNodeLabel} /> : null}
-            {showLoading ? <ThinkingStatus label="正在生成" /> : null}
           </ConversationContent>
           <ConversationScrollButton />
         </Conversation>
       </div>
 
-      <div className="pointer-events-none sticky bottom-0 z-10 -mt-28 px-4 pb-5">
+      <div className="shrink-0 px-4 pb-5">
         <PromptInput
           data-testid="ai-elements-prompt-input"
           onSubmit={handleSubmit}
-          className="pointer-events-auto mx-auto max-w-3xl"
+          className="mx-auto max-w-3xl"
         >
           <PromptInputBody>
             <PromptInputTextarea

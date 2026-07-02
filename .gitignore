@@ -42,3 +42,4 @@ dist-ssr
 
 .langgraph_api/
 .playwright-cli/
+.playwright-mcp/

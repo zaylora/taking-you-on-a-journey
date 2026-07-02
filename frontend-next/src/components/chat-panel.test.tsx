@@ -78,7 +78,7 @@ describe("ChatPanel", () => {
     expect(screen.getAllByTestId("ai-elements-message")).toHaveLength(3);
   });
 
-  it("renders reasoning, tools, and loading with AI Elements runtime components", () => {
+  it("renders reasoning and tools without generic loading copy", () => {
     renderChatPanel(
       <ChatPanel
         messages={[
@@ -114,10 +114,32 @@ describe("ChatPanel", () => {
     expect(screen.getByTestId("ai-elements-tool")).toBeVisible();
     expect(screen.getByText("查询广州天气")).toBeVisible();
     expect(screen.getByText("运行中")).toBeVisible();
-    expect(screen.getByText("正在生成")).toBeVisible();
+    expect(screen.queryByText("正在生成")).not.toBeInTheDocument();
     expect(
       screen.getByRole("heading", { name: "行程建议", level: 3 }),
     ).toBeVisible();
+  });
+
+  it("keeps the conversation wrapper from becoming a second scroll container", () => {
+    renderChatPanel(
+      <ChatPanel
+        messages={[
+          {
+            id: "assistant-1",
+            role: "assistant",
+            parts: [{ type: "text", text: "广州三天两晚路线。" }],
+          },
+        ]}
+        activeNodeLabel={null}
+        loading={false}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId("ai-elements-conversation")).toHaveClass(
+      "overflow-y-hidden",
+    );
   });
 
   it("uses the active node label for transient thinking output", () => {
