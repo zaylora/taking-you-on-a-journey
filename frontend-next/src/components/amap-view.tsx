@@ -177,11 +177,11 @@ function MapOverlay({ title }: { title: string }) {
       ? TriangleAlert
       : MapPinned;
   return (
-    <div className="absolute inset-0 flex items-center justify-center bg-zinc-100 p-6 text-center">
+    <div className="absolute inset-0 flex items-center justify-center bg-muted p-6 text-center">
       <div>
-        <Icon className="mx-auto mb-3 h-8 w-8 text-zinc-400" />
-        <p className="text-sm font-medium text-zinc-700">{title}</p>
-        <p className="mt-1 text-xs text-zinc-500">
+        <Icon className="mx-auto mb-3 h-8 w-8 text-muted-foreground" />
+        <p className="text-sm font-medium text-foreground">{title}</p>
+        <p className="mt-1 text-xs text-muted-foreground">
           配置 NEXT_PUBLIC_AMAP_JS_KEY 后加载真实地图
         </p>
       </div>

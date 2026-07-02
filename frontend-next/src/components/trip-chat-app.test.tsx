@@ -14,9 +14,67 @@ vi.mock("@/lib/sse", () => ({
 
 afterEach(() => {
   vi.clearAllMocks();
+  vi.unstubAllGlobals();
 });
 
 describe("TripChatApp", () => {
+  it("loads backend sessions and restores the latest conversation history", async () => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/sessions")) {
+        return jsonResponse({
+          sessions: [
+            {
+              thread_id: "thread-1",
+              title: "广州亲子游",
+              created_at: "2026-07-01T10:00:00Z",
+              updated_at: "2026-07-01T10:30:00Z",
+            },
+          ],
+        });
+      }
+      if (url.endsWith("/api/sessions/thread-1")) {
+        return jsonResponse({
+          thread_id: "thread-1",
+          title: "广州亲子游",
+          created_at: "2026-07-01T10:00:00Z",
+          updated_at: "2026-07-01T10:30:00Z",
+          messages: [
+            {
+              role: "user",
+              content: "第一轮：广州三天",
+              kind: "text",
+              segments: [{ kind: "text", text: "第一轮：广州三天" }],
+            },
+            {
+              role: "assistant",
+              content: "可以安排老城和珠江。",
+              kind: "text",
+              segments: [{ kind: "text", text: "可以安排老城和珠江。" }],
+            },
+          ],
+          day_plans: [],
+          budget: {},
+          plan_version: 0,
+        });
+      }
+      throw new Error(`unexpected fetch: ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    renderTripChatApp(<TripChatApp />);
+
+    const sessionNav = await screen.findByRole("navigation", { name: "历史会话" });
+    expect(sessionNav.closest("aside")).not.toBeNull();
+    expect(screen.getByRole("button", { name: "广州亲子游" })).toBeVisible();
+    expect(screen.getByText("第一轮：广州三天")).toBeVisible();
+    expect(screen.getByText("可以安排老城和珠江。")).toBeVisible();
+    expect(fetchMock.mock.calls.map(([url]) => String(url))).toEqual([
+      "http://localhost:8000/api/sessions",
+      "http://localhost:8000/api/sessions/thread-1",
+    ]);
+  });
+
   it("shows the route artifact when initial day plans exist", () => {
     renderTripChatApp(
       <TripChatApp
@@ -47,11 +105,33 @@ describe("TripChatApp", () => {
     );
 
     expect(screen.getByRole("complementary", { name: "行程工作区" })).toBeVisible();
+    expect(screen.getByTestId("trip-artifact-motion")).toHaveAttribute(
+      "data-state",
+      "open",
+    );
     expect(screen.getByTestId("ai-elements-artifact")).toBeVisible();
     expect(screen.getByRole("heading", { name: "行程地图" })).toBeVisible();
     expect(screen.getByText("1 天路线")).toBeVisible();
     expect(screen.getByRole("heading", { name: "Day 1" })).toBeVisible();
     expect(screen.getByText("陈家祠")).toBeVisible();
+  });
+
+  it("toggles the history sidebar from the chat header", () => {
+    renderTripChatApp(<TripChatApp initialState={{}} />);
+
+    expect(
+      screen.getByRole("navigation", { name: "历史会话" }),
+    ).toBeVisible();
+
+    fireEvent.click(screen.getByRole("button", { name: "显示隐藏历史会话" }));
+    expect(
+      screen.queryByRole("navigation", { name: "历史会话" }),
+    ).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole("button", { name: "显示隐藏历史会话" }));
+    expect(
+      screen.getByRole("navigation", { name: "历史会话" }),
+    ).toBeVisible();
   });
 
   it("sends the visible conversation history with the next message", async () => {
@@ -108,3 +188,10 @@ describe("TripChatApp", () => {
     );
   });
 });
+
+function jsonResponse(body: unknown) {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
+}

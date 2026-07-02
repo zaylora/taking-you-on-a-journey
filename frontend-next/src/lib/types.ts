@@ -62,6 +62,36 @@ export interface ChatMessage {
   kind?: "text" | "error";
 }
 
+export interface SessionListItem {
+  thread_id: string;
+  title: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type SessionSegment =
+  | { kind: "text"; text?: string }
+  | {
+      kind: "tool";
+      tool?: string;
+      label?: string;
+      status?: "running" | "done";
+    };
+
+export interface SessionMessage {
+  role: "user" | "assistant";
+  content?: string;
+  kind?: "text" | "error";
+  segments?: SessionSegment[];
+}
+
+export interface SessionSnapshot extends SessionListItem {
+  messages?: SessionMessage[];
+  day_plans?: DayPlan[];
+  budget?: Budget | Record<string, never>;
+  plan_version?: number;
+}
+
 export type TripSseEventName =
   | "session"
   | "title"

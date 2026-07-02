@@ -54,7 +54,6 @@ export function TripArtifact({
         data-testid="ai-elements-artifact"
         className={cn(
           "h-full w-full max-w-[820px] rounded-none border-y-0 border-r-0 bg-background shadow-2xl",
-          "animate-in slide-in-from-right-8 fade-in-0 duration-500 ease-out",
         )}
       >
         <ArtifactHeader className="h-16 shrink-0 bg-muted/40">
@@ -214,7 +213,7 @@ function DayRoute({
           .filter((item) => item.type === "transport" || item.name)
           .map((item, index) => (
             <RouteItem
-              key={item.poi_id ?? `${item.type}-${index}`}
+              key={item.poi_id || `${item.type}-${index}`}
               item={item}
               active={Boolean(item.poi_id && item.poi_id === activePoiId)}
               onSelectPoi={onSelectPoi}

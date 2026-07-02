@@ -22,5 +22,20 @@ describe("AmapView", () => {
 
     expect(screen.getByText("未配置高德地图 Key")).toBeVisible();
   });
-});
 
+  it("uses theme tokens for the configuration hint overlay", () => {
+    render(
+      <AmapView
+        dayPlans={[]}
+        activeDay={null}
+        activePoiId={null}
+        onSelectPoi={() => undefined}
+      />,
+    );
+
+    const overlay = screen.getByText("未配置高德地图 Key").closest(".absolute");
+
+    expect(overlay).toHaveClass("bg-muted");
+    expect(overlay).not.toHaveClass("bg-zinc-100");
+  });
+});

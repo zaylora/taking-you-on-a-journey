@@ -185,6 +185,28 @@ describe("ChatPanel", () => {
     expect(screen.queryByText("正在生成")).not.toBeInTheDocument();
   });
 
+  it("uses the header menu for history visibility without a second new-session button", () => {
+    const onToggleHistorySidebar = vi.fn();
+
+    renderChatPanel(
+      <ChatPanel
+        messages={[]}
+        activeNodeLabel={null}
+        loading={false}
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+        onToggleHistorySidebar={onToggleHistorySidebar}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "显示隐藏历史会话" }));
+
+    expect(onToggleHistorySidebar).toHaveBeenCalledTimes(1);
+    expect(
+      screen.queryByRole("button", { name: "新建会话" }),
+    ).not.toBeInTheDocument();
+  });
+
   it("submits and stops through the AI Elements prompt input", async () => {
     const onSubmit = vi.fn();
     const onStop = vi.fn();

@@ -2,6 +2,10 @@
 
 | 日期 | 目录 | 概述 |
 | --- | --- | --- |
+| 2026-07-02 | `docs/20260702_history_sidebar_toggle/` | 按截图调整 `frontend-next` 顶部按钮：三横线用于显示/隐藏左侧历史会话栏，删除模型选择器左侧多余的新建会话 `+`。 |
+| 2026-07-02 | `docs/20260702_frontend_next_session_history/` | 修复 `frontend-next` 不加载历史会话的问题：启动时恢复后端 sessions 和最近会话快照，并将历史会话列表放到左侧栏。 |
+| 2026-07-02 | `docs/20260702_trip_artifact_empty_poi_key/` | 修复 `frontend-next` 行程 Artifact 路线项在多个 `poi_id` 为空字符串时产生重复 React key 的 console error，并补充回归测试。 |
+| 2026-07-02 | `docs/20260702_artifact_motion_theme/` | 为 `frontend-next` 右侧行程 Artifact 工作区加入 `motion` 布局/进退场动画，并将暗色主题提升到应用根布局，统一地图占位层主题色。 |
 | 2026-07-02 | `docs/20260702_message_actions_after_generation/` | 让 `frontend-next` 助手消息底部的「复制 / 赞 / 踩」按钮只在当前回复生成结束后显示，并补充生成中隐藏按钮的行为测试。 |
 | 2026-07-02 | `docs/20260702_remove_generating_double_scrollbar/` | 去掉 `frontend-next` 聊天区的「正在生成」通用 loading 文案；确认 `use-stick-to-bottom` 内部已创建实际滚动层，将 `Conversation` 外层改为 `overflow-y-hidden`，避免出现双滚动条。 |
 | 2026-07-02 | `docs/20260702_chat_scrollbar_layout/` | 确认 `Reasoning` 已接入；将聊天区滚动条与输入框布局对齐官网 ChatGPT 示例：由悬浮 hack 改为 flex 两段式，修复滚动条贯穿窗口底部与遮挡输入框，并为 `.dark` 补 `color-scheme: dark` 使原生滚动条变深色。 |

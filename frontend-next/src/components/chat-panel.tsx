@@ -5,7 +5,6 @@ import {
   CornerDownLeft,
   Menu,
   Paperclip,
-  Plus,
   Sparkles,
   ThumbsDown,
   ThumbsUp,
@@ -57,6 +56,7 @@ interface ChatPanelProps {
   loading: boolean;
   onSubmit: (message: string) => void;
   onStop: () => void;
+  onToggleHistorySidebar?: () => void;
 }
 
 export function ChatPanel({
@@ -65,6 +65,7 @@ export function ChatPanel({
   loading,
   onSubmit,
   onStop,
+  onToggleHistorySidebar,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const showThinking =
@@ -81,14 +82,14 @@ export function ChatPanel({
   };
 
   return (
-    <section className="dark flex h-full min-w-0 flex-1 flex-col bg-background text-foreground">
+    <section className="flex h-full min-w-0 flex-1 flex-col bg-background text-foreground">
       <header className="flex h-14 shrink-0 items-center justify-between border-b border-border px-3">
         <div className="flex items-center gap-2">
-          <ToolbarIcon label="切换侧栏">
+          <ToolbarIcon
+            label="显示隐藏历史会话"
+            onClick={onToggleHistorySidebar}
+          >
             <Menu className="size-4" />
-          </ToolbarIcon>
-          <ToolbarIcon label="新建会话">
-            <Plus className="size-4" />
           </ToolbarIcon>
           <Button
             type="button"
@@ -188,9 +189,13 @@ export function ChatPanel({
 function ToolbarIcon({
   label,
   children,
+  disabled = false,
+  onClick,
 }: {
   label: string;
   children: ReactNode;
+  disabled?: boolean;
+  onClick?: () => void;
 }) {
   return (
     <Button
@@ -199,6 +204,8 @@ function ToolbarIcon({
       title={label}
       variant="outline"
       size="icon"
+      disabled={disabled}
+      onClick={onClick}
       className="h-9 w-9 bg-background"
     >
       {children}
