@@ -244,6 +244,8 @@ function ChatMessageItem({
   const lastAssistantTextIndex = isUser
     ? -1
     : findLastAssistantTextIndex(message.parts);
+  const showActions =
+    !isUser && message.kind !== "error" && !(loading && isLatestAssistant);
 
   return (
     <Message
@@ -280,7 +282,7 @@ function ChatMessageItem({
           />
         ))}
       </MessageContent>
-      {!isUser && message.kind !== "error" ? (
+      {showActions ? (
         <MessageActions className="ml-0 text-muted-foreground">
           <MessageAction label="复制" tooltip="复制">
             <Copy className="size-3.5" />

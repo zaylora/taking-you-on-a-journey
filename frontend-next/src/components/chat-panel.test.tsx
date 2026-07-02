@@ -142,6 +142,28 @@ describe("ChatPanel", () => {
     );
   });
 
+  it("hides assistant message actions while the latest answer is generating", () => {
+    renderChatPanel(
+      <ChatPanel
+        messages={[
+          {
+            id: "assistant-1",
+            role: "assistant",
+            parts: [{ type: "text", text: "广州三天两晚路线生成中。" }],
+          },
+        ]}
+        activeNodeLabel={null}
+        loading
+        onSubmit={vi.fn()}
+        onStop={vi.fn()}
+      />,
+    );
+
+    expect(screen.queryByRole("button", { name: "复制" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "赞" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "踩" })).not.toBeInTheDocument();
+  });
+
   it("uses the active node label for transient thinking output", () => {
     renderChatPanel(
       <ChatPanel
